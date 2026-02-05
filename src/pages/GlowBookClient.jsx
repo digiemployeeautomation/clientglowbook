@@ -326,540 +326,6 @@ function AuthScreen({ onAuth, onDemo }) {
 // ═══════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════
-export default function GlowBookClient() {
-  // ── AUTH STATE ──
-  const [authUser, setAuthUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [isDemo, setIsDemo] = useState(false);
-
-  // ── APP STATE ──
-  const [page, setPage] = useState('home');
-  const [branches, setBranches] = useState([]);
-  const [services, setServices] = useState([]);
-  const [staff, setStaff] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [reviews, setReviews] = useState([]);
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
-  const [selectedBranch, setSelectedBranch] = useState(null);
-  const [selectedService, setSelectedService] = useState(null);
-  const [selectedBooking, setSelectedBooking] = useState(null);
-  const [bookingFlow, setBookingFlow] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [client, setClient] = useState({ id: null, name: 'Guest', phone: '', email: '' });
-  const [navHistory, setNavHistory] = useState([]);
-  const [favorites, setFavorites] = useState([]);
-
-  // ── AUTH CHECK ──
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user || null);
-      setAuthChecked(true);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user || null);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setAuthUser(null);
-    setIsDemo(false);
-    setClient({ id: null, name: 'Guest', phone: '', email: '' });
-    setPage('home');
-  };
-
-  // ── DATA FETCH ──
-  const fetchAll = async (user) => {
-    setLoading(true);
-    try {
-      const [b, sv, st, cl, rv, bk] = await Promise.all([
-        supabase.from('branches').select('*').eq('is_active', true),
-        supabase.from('services').select('*').eq('is_active', true).order('category, name'),
-        supabase.from('staff').select('*').eq('is_active', true).order('name'),
-        supabase.from('clients').select('*'),
-        supabase.from('reviews').select('*').order('created_at', { ascending: false }),
-        supabase.from('bookings').select('*').order('booking_date', { ascending: false }),
-      ]);
-      setBranches(b.data || []);
-      setServices(sv.data || []);
-      setStaff(st.data || []);
-      setClients(cl.data || []);
-      setReviews(rv.data || []);
-      setBookings(bk.data || []);
-
-      // Find client profile linked to auth user
-      if (user) {
-        const linked = (cl.data || []).find(c => c.auth_user_id === user.id);
-        if (linked) setClient(linked);
-        else {
-          // Fallback: match by email
-          const byEmail = (cl.data || []).find(c => c.email === user.email);
-          if (byEmail) {
-            // Link this client to auth user
-            await supabase.from('clients').update({ auth_user_id: user.id }).eq('id', byEmail.id);
-            setClient({ ...byEmail, auth_user_id: user.id });
-          } else {
-            setClient({ id: null, name: user.user_metadata?.name || user.email, email: user.email, phone: '' });
-          }
-        }
-      } else if (cl.data?.length) {
-        // Demo mode: use first client
-        setClient(cl.data[0]);
-      }
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    if (authChecked && (authUser || isDemo)) fetchAll(authUser);
-  }, [authChecked, authUser, isDemo]);
-
-  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
-
-  // ── NOTIFICATION CENTER ──
-  const [notifications, setNotifications] = useState([]);
-  const pushNotif = (title, body, type = 'info') => {
-    setNotifications(prev => [{ id: Date.now(), title, body, type, time: new Date(), read: false }, ...prev].slice(0, 50));
-  };
-  const unreadCount = notifications.filter(n => !n.read).length;
-  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-
-  // ── REAL-TIME SUBSCRIPTIONS ──
-  useEffect(() => {
-    if (!client?.id) return;
-    const channel = supabase.channel('client-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `client_id=eq.${client.id}` }, payload => {
-        if (payload.eventType === 'UPDATE') {
-          const b = payload.new;
-          if (b.status === 'confirmed') { showToast('Your booking was confirmed! ✅'); pushNotif('Booking Confirmed', `Your appointment on ${b.booking_date} at ${b.booking_time} has been confirmed`, 'success'); }
-          else if (b.status === 'cancelled' && b.cancelled_by === 'business') { showToast('A booking was cancelled by the salon', 'error'); pushNotif('Booking Cancelled', `Your appointment on ${b.booking_date} was cancelled by the salon`, 'error'); }
-          else if (b.status === 'completed') { pushNotif('Booking Complete', `Your appointment is done! Leave a review to earn GlowPoints ⭐`, 'success'); }
-        }
-        fetchAll();
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reviews', filter: `client_id=eq.${client.id}` }, () => fetchAll())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [client?.id]);
-
-  // ── BOOKING REMINDERS ──
-  const [reminders, setReminders] = useState([]);
-  useEffect(() => {
-    if (!upcomingBookings.length) { setReminders([]); return; }
-    const now = new Date();
-    const rem = upcomingBookings.filter(b => {
-      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
-      const hoursUntil = (dt - now) / (1000 * 60 * 60);
-      return hoursUntil > 0 && hoursUntil <= 24;
-    }).map(b => {
-      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
-      const hoursUntil = Math.round((dt - new Date()) / (1000 * 60 * 60));
-      return { ...b, hoursUntil };
-    });
-    setReminders(rem);
-  }, [upcomingBookings]);
-
-  // ── NAVIGATION ──
-  const navigate = (pg, data) => {
-    setNavHistory(h => [...h, page]);
-    setPage(pg);
-    if (data?.branch) setSelectedBranch(data.branch);
-    if (data?.service) setSelectedService(data.service);
-    if (data?.booking) setSelectedBooking(data.booking);
-    if (data?.bookingFlow) setBookingFlow(data.bookingFlow);
-  };
-  const goBack = () => {
-    const prev = navHistory[navHistory.length - 1] || 'home';
-    setNavHistory(h => h.slice(0, -1));
-    setPage(prev);
-  };
-
-  // ── HELPERS ──
-  const getBranch = id => branches.find(b => b.id === id);
-  const getService = id => services.find(s => s.id === id);
-  const getStaffMember = id => staff.find(s => s.id === id);
-  const getClient = id => clients.find(c => c.id === id);
-  const branchReviews = bid => reviews.filter(r => r.branch_id === bid);
-  const branchStaff = bid => staff.filter(s => s.branch_id === bid);
-  const branchAvgRating = bid => {
-    const rv = branchReviews(bid);
-    return rv.length ? (rv.reduce((s, r) => s + (r.rating_overall || 0), 0) / rv.length).toFixed(1) : '—';
-  };
-  const clientBookings = bookings.filter(b => b.client_id === client?.id);
-  const upcomingBookings = clientBookings.filter(b => b.booking_date >= todayStr() && !['cancelled','completed','no_show'].includes(b.status));
-  const pastBookings = clientBookings.filter(b => b.status === 'completed' || b.status === 'no_show' || (b.booking_date < todayStr() && b.status !== 'cancelled'));
-  const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean))];
-
-  const toggleFav = bid => setFavorites(f => f.includes(bid) ? f.filter(x => x !== bid) : [...f, bid]);
-
-  // ── BOOKING ACTIONS ──
-  const cancelBooking = async (id) => {
-    // Cancellation policy enforcement
-    const bk = bookings.find(b => b.id === id);
-    if (bk) {
-      const br = branches.find(b => b.id === bk.branch_id);
-      const cancelHours = br?.cancellation_hours ?? 2;
-      const bookingDateTime = new Date(`${bk.booking_date}T${bk.booking_time || '00:00'}`);
-      const hoursUntil = (bookingDateTime - new Date()) / (1000 * 60 * 60);
-      if (hoursUntil < cancelHours && hoursUntil > 0) {
-        const feePercent = br?.cancellation_fee_percent || 0;
-        if (feePercent > 0) {
-          const fee = Math.round((bk.total_amount || 0) * feePercent / 100);
-          showToast(`Late cancellation — K${fee} fee (${feePercent}%) may apply`, 'error');
-        }
-      }
-    }
-    const { error } = await supabase.from('bookings').update({
-      status: 'cancelled', cancelled_at: new Date().toISOString(), cancellation_reason: 'Cancelled by client', cancelled_by: 'client', updated_at: new Date().toISOString()
-    }).eq('id', id);
-    if (!error) { showToast('Booking cancelled'); fetchAll(); }
-    else showToast('Failed to cancel', 'error');
-  };
-
-  const createBooking = async (flow) => {
-    // Double-booking check
-    if (flow.staff?.id) {
-      const { data: existing } = await supabase.from('bookings')
-        .select('id').eq('staff_id', flow.staff.id)
-        .eq('booking_date', flow.date).eq('booking_time', flow.time)
-        .neq('status', 'cancelled').limit(1);
-      if (existing?.length) {
-        showToast('This time slot was just booked. Please pick another.', 'error');
-        return;
-      }
-    }
-
-    // Rescheduling — update existing booking
-    if (flow.rescheduleId) {
-      const { error } = await supabase.from('bookings').update({
-        booking_date: flow.date, booking_time: flow.time, staff_id: flow.staff?.id || null,
-        status: 'pending', updated_at: new Date().toISOString(),
-      }).eq('id', flow.rescheduleId);
-      if (!error) { showToast('Booking rescheduled! 📅'); fetchAll(); setBookingFlow(null); setPage('bookings'); }
-      else showToast('Reschedule failed: ' + error.message, 'error');
-      return;
-    }
-    const svc = flow.service;
-    const pointsDiscount = flow.usePoints && flow.pointsToUse > 0 ? Math.floor(flow.pointsToUse / 10) : 0;
-    const rawAmount = svc.price_max || svc.price || 0;
-    const finalAmount = Math.max(0, rawAmount - pointsDiscount);
-    const baseData = {
-      branch_id: flow.branch.id, client_id: client.id,
-      service_id: svc.id, staff_id: flow.staff?.id || null,
-      booking_date: flow.date, booking_time: flow.time,
-      duration: svc.duration_max || svc.duration || 60,
-      total_amount: finalAmount,
-      discount_amount: pointsDiscount,
-      points_used: flow.pointsToUse || 0,
-      client_notes: flow.clientNotes || null,
-      status: 'pending',
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    };
-    // Recurring bookings
-    if (flow.recurring && flow.recurringType) {
-      const recurringId = crypto.randomUUID();
-      const bookings = []; const weeks = flow.recurringType === 'weekly' ? 1 : flow.recurringType === 'biweekly' ? 2 : 4;
-      const until = flow.recurringUntil || new Date(new Date(flow.date).getTime() + weeks * 4 * 7 * 86400000).toISOString().slice(0,10);
-      let d = new Date(flow.date);
-      while (d.toISOString().slice(0,10) <= until) {
-        bookings.push({ ...baseData, booking_date: d.toISOString().slice(0,10), recurring_id: recurringId, recurring_type: flow.recurringType, recurring_until: until });
-        d = new Date(d.getTime() + weeks * 7 * 86400000);
-      }
-      const { error } = await supabase.from('bookings').insert(bookings);
-      if (!error) { showToast(`${bookings.length} recurring bookings created! 🎉`); fetchAll(); setBookingFlow(null); setPage('bookings'); }
-      else showToast('Booking failed: ' + error.message, 'error');
-    } else {
-      const { error } = await supabase.from('bookings').insert(baseData);
-      if (!error) {
-        // Deduct GlowPoints if used
-        if (flow.pointsToUse > 0 && client.id) {
-          await supabase.from('clients').update({ glow_points: Math.max(0, (client.glow_points || 0) - flow.pointsToUse) }).eq('id', client.id);
-        }
-        showToast('Booking confirmed! 🎉'); fetchAll(); setBookingFlow(null); setPage('bookings');
-      }
-      else {
-        const msg = error.message.includes('unique') || error.message.includes('duplicate') ? 'This time slot was just booked by someone else. Please choose another.' : error.message;
-        showToast('Booking failed: ' + msg, 'error');
-      }
-    }
-  };
-
-  // ═══ AUTH GATE ═══
-  if (!authChecked) return (
-    <div style={{ minHeight:'100vh', background:BG, display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <style>{css}</style>
-      <div style={{ display:'flex', gap:6 }}>
-        {[0,1,2].map(i => <div key={i} style={{ width:8, height:8, borderRadius:4, background:ACCENT, animation:`pulse 1.2s ease ${i*.2}s infinite` }} />)}
-      </div>
-    </div>
-  );
-
-  if (!authUser && !isDemo) return (
-    <AuthScreen
-      onAuth={(user) => setAuthUser(user)}
-      onDemo={() => setIsDemo(true)}
-    />
-  );
-
-  // ═══ LOADING STATE ═══
-  if (loading) return (
-    <div style={{ minHeight:'100vh', background:BG, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
-      <div style={{ fontSize:36, fontFamily:'Fraunces,serif', fontWeight:700, color:ACCENT }}>GlowBook</div>
-      <div style={{ display:'flex', gap:6 }}>
-        {[0,1,2].map(i => <div key={i} style={{ width:8, height:8, borderRadius:4, background:ACCENT, animation:`pulse 1.2s ease ${i*.2}s infinite` }} />)}
-      </div>
-    </div>
-  );
-
-  // ═══ RENDER PAGES ═══
-  const pages = {
-    home: <HomePage {...{ branches, services, reviews, staff, branchAvgRating, branchReviews, categories, selectedCategory, setSelectedCategory, searchQuery, setSearchQuery, navigate, favorites, toggleFav, reminders, getService: id => services.find(s => s.id === id), getBranch: id => branches.find(b => b.id === id), notifications, unreadCount, markAllRead }} />,
-    explore: <ExplorePage {...{ branches, services, reviews, branchAvgRating, branchReviews, navigate, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory, categories, favorites, toggleFav }} />,
-    salon: <SalonPage {...{ branch: selectedBranch, services, reviews: branchReviews(selectedBranch?.id), staff: branchStaff(selectedBranch?.id), branchAvgRating, navigate, goBack, favorites, toggleFav, getClient, client }} />,
-    booking: <BookingFlow {...{ flow: {...bookingFlow, clientId: client?.id}, setBookingFlow, staff: branchStaff(bookingFlow?.branch?.id), services, createBooking, goBack, navigate }} />,
-    bookings: <MyBookingsPage {...{ upcoming: upcomingBookings, past: pastBookings, getService, getStaffMember, getBranch, cancelBooking, rescheduleBooking: (bk) => {
-      const svc = getService(bk.service_id); const br = getBranch(bk.branch_id); const stf = getStaffMember(bk.staff_id);
-      setBookingFlow({ step: 2, branch: br, service: svc, staff: stf || { id: null, name: 'Any Available' }, date: null, time: null, rescheduleId: bk.id, clientPoints: client?.glow_points || 0 });
-      setPage('booking');
-    }, navigate, selectedBooking, setSelectedBooking }} />,
-    profile: <ProfilePage {...{ client, clientBookings, branches, favorites, getBranch, navigate, showToast, authUser, isDemo, handleLogout }} />,
-  };
-
-  return (
-    <div style={{ minHeight:'100vh', background:BG, maxWidth:480, margin:'0 auto', position:'relative', paddingBottom:72 }}>
-      <style>{css}</style>
-      {pages[page] || pages.home}
-      {/* Bottom Nav */}
-      <nav style={{ position:'fixed', bottom:0, left:'50%', transform:'translateX(-50%)', width:'100%', maxWidth:480,
-        background:'rgba(255,255,255,.92)', backdropFilter:'blur(16px)', borderTop:`1px solid ${BORDER}`,
-        display:'flex', justifyContent:'space-around', padding:'8px 0 env(safe-area-inset-bottom, 8px)', zIndex:900 }}>
-        {[
-          { id:'home', icon:'home', label:'Home' },
-          { id:'explore', icon:'search', label:'Explore' },
-          { id:'bookings', icon:'calendar', label:'Bookings' },
-          { id:'profile', icon:'user', label:'Profile' },
-        ].map(n => (
-          <button key={n.id} onClick={() => { setNavHistory([]); setPage(n.id); }}
-            style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, background:'none', border:'none',
-              cursor:'pointer', padding:'4px 16px', borderRadius:12, transition:'all .2s',
-              color: page === n.id ? ACCENT : MUTED }}>
-            <Icon name={n.icon} size={22} color={page === n.id ? ACCENT : MUTED} />
-            <span style={{ fontSize:11, fontWeight: page === n.id ? 700 : 500 }}>{n.label}</span>
-          </button>
-        ))}
-      </nav>
-      {toast && <Toast message={toast.msg} type={toast.type} />}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// HOME PAGE
-// ═══════════════════════════════════════════════════════════════════════
-function HomePage({ branches, services, reviews, staff, branchAvgRating, branchReviews, categories, selectedCategory, setSelectedCategory, searchQuery, setSearchQuery, navigate, favorites, toggleFav, reminders, getService, getBranch, notifications, unreadCount, markAllRead }) {
-  const [showNotifs, setShowNotifs] = useState(false);
-  const topBranches = [...branches].sort((a, b) => {
-    const ra = branchReviews(a.id), rb = branchReviews(b.id);
-    const avgA = ra.length ? ra.reduce((s, r) => s + r.rating_overall, 0) / ra.length : 0;
-    const avgB = rb.length ? rb.reduce((s, r) => s + r.rating_overall, 0) / rb.length : 0;
-    return avgB - avgA;
-  });
-
-  const filteredServices = selectedCategory === 'All' ? services : services.filter(s => s.category === selectedCategory);
-  const recentReviews = reviews.slice(0, 5);
-
-  return (
-    <div className="fade-up">
-      {/* Header */}
-      <div style={{ background:`linear-gradient(135deg, ${ACCENT}, ${ROSE})`, padding:'48px 20px 28px', borderRadius:'0 0 28px 28px', marginBottom:20 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
-          <div>
-            <p style={{ color:'rgba(255,255,255,.8)', fontSize:14, marginBottom:4 }}>Welcome to</p>
-            <h1 style={{ fontFamily:'Fraunces,serif', fontSize:28, fontWeight:700, color:'#fff' }}>GlowBook ✨</h1>
-          </div>
-          <div onClick={() => setShowNotifs(true)} style={{ width:40, height:40, borderRadius:20, background:'rgba(255,255,255,.2)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', position:'relative' }}>
-            <Icon name="sparkle" size={20} color="#fff" />
-            {unreadCount > 0 && <span style={{ position:'absolute', top:-2, right:-2, width:18, height:18, borderRadius:9, background:'#EF4444', color:'#fff', fontSize:10, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>{unreadCount}</span>}
-          </div>
-        </div>
-        {/* Search */}
-        <div style={{ background:'rgba(255,255,255,.95)', borderRadius:14, display:'flex', alignItems:'center', padding:'0 14px', boxShadow:'0 4px 20px rgba(0,0,0,.08)' }}>
-          <Icon name="search" size={18} color={MUTED} />
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search salons, services..."
-            onFocus={() => navigate('explore')}
-            style={{ flex:1, border:'none', background:'none', padding:'13px 10px', fontSize:15, color:DARK }} />
-        </div>
-      </div>
-
-      <div style={{ padding:'0 20px' }}>
-        {/* Booking Reminders */}
-        {reminders && reminders.length > 0 && (
-          <div style={{ marginBottom:16 }}>
-            {reminders.map(r => {
-              const svc = getService?.(r.service_id);
-              const br = getBranch?.(r.branch_id);
-              return (
-                <div key={r.id} onClick={() => navigate('bookings')}
-                  style={{ background:`linear-gradient(135deg, ${ACCENT}12, ${ROSE}12)`, borderRadius:16, padding:14, marginBottom:8,
-                    border:`1px solid ${ACCENT}25`, cursor:'pointer', display:'flex', gap:12, alignItems:'center' }}>
-                  <div style={{ width:44, height:44, borderRadius:12, background:`linear-gradient(135deg, ${ACCENT}30, ${GOLD}30)`,
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, flexShrink:0 }}>⏰</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:ACCENT }}>Upcoming in {r.hoursUntil}h</div>
-                    <div style={{ fontSize:14, fontWeight:600 }}>{svc?.name || 'Appointment'}</div>
-                    <div style={{ fontSize:12, color:MUTED }}>{br?.name} · {fmtTime(r.booking_time)}</div>
-                  </div>
-                  <Icon name="chevR" size={16} color={ACCENT} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Categories */}
-        <div style={{ display:'flex', gap:8, overflowX:'auto', paddingBottom:16, marginBottom:8 }}>
-          {categories.map(c => (
-            <button key={c} onClick={() => { setSelectedCategory(c); navigate('explore'); }}
-              style={{ flexShrink:0, padding:'10px 18px', borderRadius:50, border:`1.5px solid ${c === selectedCategory ? ACCENT : BORDER}`,
-                background: c === selectedCategory ? `${ACCENT}12` : CARD, color: c === selectedCategory ? ACCENT : DARK,
-                fontSize:13, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', gap:6, transition:'all .2s' }}>
-              {c !== 'All' && <span>{CATEGORIES_ICONS[c] || '•'}</span>}{c}
-            </button>
-          ))}
-        </div>
-
-        {/* Top Salons */}
-        <div style={{ marginBottom:28 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-            <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600 }}>Top Salons</h2>
-            <button onClick={() => navigate('explore')} style={{ background:'none', border:'none', color:ACCENT, fontSize:13, fontWeight:600, cursor:'pointer' }}>See all →</button>
-          </div>
-          <div style={{ display:'flex', gap:14, overflowX:'auto', paddingBottom:8 }}>
-            {topBranches.map(b => (
-              <SalonCard key={b.id} branch={b} avg={branchAvgRating(b.id)} reviewCount={branchReviews(b.id).length}
-                staffCount={staff.filter(s => s.branch_id === b.id).length}
-                onClick={() => navigate('salon', { branch: b })} isFav={favorites.includes(b.id)} onFav={() => toggleFav(b.id)} />
-            ))}
-          </div>
-        </div>
-
-        {/* Popular Services */}
-        <div style={{ marginBottom:28 }}>
-          <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600, marginBottom:14 }}>Popular Services</h2>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-            {services.slice(0, 6).map(s => (
-              <div key={s.id} onClick={() => navigate('explore', { service: s })}
-                style={{ background:CARD, borderRadius:16, padding:16, border:`1px solid ${BORDER}`, cursor:'pointer', transition:'all .2s', overflow:'hidden' }}
-                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-                {s.image ? (
-                  <img src={s.image} alt="" style={{ width:'100%', height:72, objectFit:'cover', borderRadius:10, marginBottom:10 }} />
-                ) : (
-                  <div style={{ fontSize:24, marginBottom:8 }}>{CATEGORIES_ICONS[s.category] || '✨'}</div>
-                )}
-                <div style={{ fontSize:14, fontWeight:600, marginBottom:4, lineHeight:1.3 }}>{s.name}</div>
-                <div style={{ fontSize:13, color:MUTED }}>{s.duration}{s.duration_max && s.duration_max !== s.duration ? `–${s.duration_max}` : ''} min</div>
-                <div style={{ fontSize:15, fontWeight:700, color:ACCENT, marginTop:6 }}>K{s.price}{s.price_max && s.price_max !== s.price ? `–${s.price_max}` : ''}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent Reviews */}
-        {recentReviews.length > 0 && (
-          <div style={{ marginBottom:28 }}>
-            <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600, marginBottom:14 }}>Recent Reviews</h2>
-            {recentReviews.map(r => {
-              const br = branches.find(b => b.id === r.branch_id);
-              return (
-                <div key={r.id} style={{ background:CARD, borderRadius:16, padding:16, border:`1px solid ${BORDER}`, marginBottom:10 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                    <span style={{ fontWeight:600, fontSize:14 }}>{br?.name || 'Salon'}</span>
-                    <Stars rating={r.rating_overall} size={12} />
-                  </div>
-                  <p style={{ fontSize:13, color:MUTED, lineHeight:1.5 }}>{r.review_text?.slice(0, 120)}{r.review_text?.length > 120 ? '...' : ''}</p>
-                  {r.response_text && (
-                    <div style={{ marginTop:10, padding:10, background:`${ACCENT}08`, borderRadius:10, borderLeft:`3px solid ${ACCENT}` }}>
-                      <span style={{ fontSize:11, fontWeight:600, color:ACCENT }}>Response:</span>
-                      <p style={{ fontSize:12, color:MUTED, marginTop:4 }}>{r.response_text}</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Notification Panel */}
-      <BottomSheet open={showNotifs} onClose={() => { setShowNotifs(false); markAllRead(); }} title="Notifications">
-        {notifications && notifications.length > 0 ? (
-          <div style={{ maxHeight:400, overflowY:'auto' }}>
-            {notifications.slice(0, 20).map(n => (
-              <div key={n.id} style={{ padding:'12px 0', borderBottom:`1px solid ${BORDER}`, opacity: n.read ? 0.6 : 1 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-                  <span style={{ fontSize:14 }}>{n.type === 'success' ? '✅' : n.type === 'error' ? '❌' : '🔔'}</span>
-                  <span style={{ fontSize:14, fontWeight:600, flex:1 }}>{n.title}</span>
-                  {!n.read && <span style={{ width:8, height:8, borderRadius:4, background:ACCENT }} />}
-                </div>
-                <p style={{ fontSize:13, color:MUTED, lineHeight:1.4, marginLeft:26 }}>{n.body}</p>
-                <span style={{ fontSize:11, color:MUTED, marginLeft:26 }}>{n.time?.toLocaleTimeString?.() || ''}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon="🔔" title="No notifications" sub="You're all caught up!" />
-        )}
-      </BottomSheet>
-    </div>
-  );
-}
-
-// ─── SALON CARD ─────────────────────────────────────────────────────
-function SalonCard({ branch, avg, reviewCount, staffCount, onClick, isFav, onFav }) {
-  const colors = ['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
-  const bgColor = colors[branch.name?.length % colors.length] || ACCENT;
-
-  return (
-    <div onClick={onClick} style={{ flexShrink:0, width:220, background:CARD, borderRadius:20, overflow:'hidden',
-      border:`1px solid ${BORDER}`, cursor:'pointer', transition:'all .2s', boxShadow:'0 2px 12px rgba(0,0,0,.04)' }}
-      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
-      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-      <div style={{ height:120, background:`linear-gradient(135deg, ${bgColor}, ${bgColor}dd)`, position:'relative',
-        display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <span style={{ fontSize:40, opacity:.3 }}>✂</span>
-        <button onClick={e => { e.stopPropagation(); onFav(); }}
-          style={{ position:'absolute', top:10, right:10, background:'rgba(255,255,255,.8)', border:'none', borderRadius:50,
-            width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
-          <Icon name="heart" size={16} color={isFav ? ROSE : '#999'} />
-        </button>
-      </div>
-      <div style={{ padding:14 }}>
-        <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>{branch.name}</h3>
-        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:MUTED, marginBottom:8 }}>
-          <Icon name="map" size={12} color={MUTED} />{branch.location || 'Lusaka'}
-        </div>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <Stars rating={Math.round(+avg)} size={12} />
-            <span style={{ fontSize:12, fontWeight:600 }}>{avg}</span>
-            <span style={{ fontSize:11, color:MUTED }}>({reviewCount})</span>
-          </div>
-          <span style={{ fontSize:11, color:MUTED }}>{staffCount} stylists</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// EXPLORE PAGE
-// ═══════════════════════════════════════════════════════════════════════
 function ExplorePage({ branches, services, reviews, branchAvgRating, branchReviews, navigate, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory, categories, favorites, toggleFav }) {
   const staff_data = [];
 
@@ -1582,6 +1048,7 @@ function BookingFlow({ flow, setBookingFlow, staff, services, createBooking, goB
 // ═══════════════════════════════════════════════════════════════════════
 // MY BOOKINGS PAGE
 // ═══════════════════════════════════════════════════════════════════════
+
 function MyBookingsPage({ upcoming, past, getService, getStaffMember, getBranch, cancelBooking, rescheduleBooking, navigate, selectedBooking, setSelectedBooking }) {
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -1702,6 +1169,7 @@ function MyBookingsPage({ upcoming, past, getService, getStaffMember, getBranch,
 // ═══════════════════════════════════════════════════════════════════════
 // PROFILE PAGE
 // ═══════════════════════════════════════════════════════════════════════
+
 function ProfilePage({ client, clientBookings, branches, favorites, getBranch, navigate, showToast, authUser, isDemo, handleLogout }) {
   const totalSpent = clientBookings.filter(b => b.status === 'completed').reduce((s, b) => s + (b.total_amount || 0), 0);
   const points = client.glow_points || 0;
@@ -1950,3 +1418,537 @@ function ProfilePage({ client, clientBookings, branches, favorites, getBranch, n
     </div>
   );
 }
+
+function HomePage({ branches, services, reviews, staff, branchAvgRating, branchReviews, categories, selectedCategory, setSelectedCategory, searchQuery, setSearchQuery, navigate, favorites, toggleFav, reminders, getService, getBranch, notifications, unreadCount, markAllRead }) {
+  const [showNotifs, setShowNotifs] = useState(false);
+  const topBranches = [...branches].sort((a, b) => {
+    const ra = branchReviews(a.id), rb = branchReviews(b.id);
+    const avgA = ra.length ? ra.reduce((s, r) => s + r.rating_overall, 0) / ra.length : 0;
+    const avgB = rb.length ? rb.reduce((s, r) => s + r.rating_overall, 0) / rb.length : 0;
+    return avgB - avgA;
+  });
+
+  const filteredServices = selectedCategory === 'All' ? services : services.filter(s => s.category === selectedCategory);
+  const recentReviews = reviews.slice(0, 5);
+
+  return (
+    <div className="fade-up">
+      {/* Header */}
+      <div style={{ background:`linear-gradient(135deg, ${ACCENT}, ${ROSE})`, padding:'48px 20px 28px', borderRadius:'0 0 28px 28px', marginBottom:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+          <div>
+            <p style={{ color:'rgba(255,255,255,.8)', fontSize:14, marginBottom:4 }}>Welcome to</p>
+            <h1 style={{ fontFamily:'Fraunces,serif', fontSize:28, fontWeight:700, color:'#fff' }}>GlowBook ✨</h1>
+          </div>
+          <div onClick={() => setShowNotifs(true)} style={{ width:40, height:40, borderRadius:20, background:'rgba(255,255,255,.2)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', position:'relative' }}>
+            <Icon name="sparkle" size={20} color="#fff" />
+            {unreadCount > 0 && <span style={{ position:'absolute', top:-2, right:-2, width:18, height:18, borderRadius:9, background:'#EF4444', color:'#fff', fontSize:10, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>{unreadCount}</span>}
+          </div>
+        </div>
+        {/* Search */}
+        <div style={{ background:'rgba(255,255,255,.95)', borderRadius:14, display:'flex', alignItems:'center', padding:'0 14px', boxShadow:'0 4px 20px rgba(0,0,0,.08)' }}>
+          <Icon name="search" size={18} color={MUTED} />
+          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search salons, services..."
+            onFocus={() => navigate('explore')}
+            style={{ flex:1, border:'none', background:'none', padding:'13px 10px', fontSize:15, color:DARK }} />
+        </div>
+      </div>
+
+      <div style={{ padding:'0 20px' }}>
+        {/* Booking Reminders */}
+        {reminders && reminders.length > 0 && (
+          <div style={{ marginBottom:16 }}>
+            {reminders.map(r => {
+              const svc = getService?.(r.service_id);
+              const br = getBranch?.(r.branch_id);
+              return (
+                <div key={r.id} onClick={() => navigate('bookings')}
+                  style={{ background:`linear-gradient(135deg, ${ACCENT}12, ${ROSE}12)`, borderRadius:16, padding:14, marginBottom:8,
+                    border:`1px solid ${ACCENT}25`, cursor:'pointer', display:'flex', gap:12, alignItems:'center' }}>
+                  <div style={{ width:44, height:44, borderRadius:12, background:`linear-gradient(135deg, ${ACCENT}30, ${GOLD}30)`,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, flexShrink:0 }}>⏰</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:ACCENT }}>Upcoming in {r.hoursUntil}h</div>
+                    <div style={{ fontSize:14, fontWeight:600 }}>{svc?.name || 'Appointment'}</div>
+                    <div style={{ fontSize:12, color:MUTED }}>{br?.name} · {fmtTime(r.booking_time)}</div>
+                  </div>
+                  <Icon name="chevR" size={16} color={ACCENT} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Categories */}
+        <div style={{ display:'flex', gap:8, overflowX:'auto', paddingBottom:16, marginBottom:8 }}>
+          {categories.map(c => (
+            <button key={c} onClick={() => { setSelectedCategory(c); navigate('explore'); }}
+              style={{ flexShrink:0, padding:'10px 18px', borderRadius:50, border:`1.5px solid ${c === selectedCategory ? ACCENT : BORDER}`,
+                background: c === selectedCategory ? `${ACCENT}12` : CARD, color: c === selectedCategory ? ACCENT : DARK,
+                fontSize:13, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', gap:6, transition:'all .2s' }}>
+              {c !== 'All' && <span>{CATEGORIES_ICONS[c] || '•'}</span>}{c}
+            </button>
+          ))}
+        </div>
+
+        {/* Top Salons */}
+        <div style={{ marginBottom:28 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+            <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600 }}>Top Salons</h2>
+            <button onClick={() => navigate('explore')} style={{ background:'none', border:'none', color:ACCENT, fontSize:13, fontWeight:600, cursor:'pointer' }}>See all →</button>
+          </div>
+          <div style={{ display:'flex', gap:14, overflowX:'auto', paddingBottom:8 }}>
+            {topBranches.map(b => (
+              <SalonCard key={b.id} branch={b} avg={branchAvgRating(b.id)} reviewCount={branchReviews(b.id).length}
+                staffCount={staff.filter(s => s.branch_id === b.id).length}
+                onClick={() => navigate('salon', { branch: b })} isFav={favorites.includes(b.id)} onFav={() => toggleFav(b.id)} />
+            ))}
+          </div>
+        </div>
+
+        {/* Popular Services */}
+        <div style={{ marginBottom:28 }}>
+          <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600, marginBottom:14 }}>Popular Services</h2>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            {services.slice(0, 6).map(s => (
+              <div key={s.id} onClick={() => navigate('explore', { service: s })}
+                style={{ background:CARD, borderRadius:16, padding:16, border:`1px solid ${BORDER}`, cursor:'pointer', transition:'all .2s', overflow:'hidden' }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+                {s.image ? (
+                  <img src={s.image} alt="" style={{ width:'100%', height:72, objectFit:'cover', borderRadius:10, marginBottom:10 }} />
+                ) : (
+                  <div style={{ fontSize:24, marginBottom:8 }}>{CATEGORIES_ICONS[s.category] || '✨'}</div>
+                )}
+                <div style={{ fontSize:14, fontWeight:600, marginBottom:4, lineHeight:1.3 }}>{s.name}</div>
+                <div style={{ fontSize:13, color:MUTED }}>{s.duration}{s.duration_max && s.duration_max !== s.duration ? `–${s.duration_max}` : ''} min</div>
+                <div style={{ fontSize:15, fontWeight:700, color:ACCENT, marginTop:6 }}>K{s.price}{s.price_max && s.price_max !== s.price ? `–${s.price_max}` : ''}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Reviews */}
+        {recentReviews.length > 0 && (
+          <div style={{ marginBottom:28 }}>
+            <h2 style={{ fontFamily:'Fraunces,serif', fontSize:20, fontWeight:600, marginBottom:14 }}>Recent Reviews</h2>
+            {recentReviews.map(r => {
+              const br = branches.find(b => b.id === r.branch_id);
+              return (
+                <div key={r.id} style={{ background:CARD, borderRadius:16, padding:16, border:`1px solid ${BORDER}`, marginBottom:10 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <span style={{ fontWeight:600, fontSize:14 }}>{br?.name || 'Salon'}</span>
+                    <Stars rating={r.rating_overall} size={12} />
+                  </div>
+                  <p style={{ fontSize:13, color:MUTED, lineHeight:1.5 }}>{r.review_text?.slice(0, 120)}{r.review_text?.length > 120 ? '...' : ''}</p>
+                  {r.response_text && (
+                    <div style={{ marginTop:10, padding:10, background:`${ACCENT}08`, borderRadius:10, borderLeft:`3px solid ${ACCENT}` }}>
+                      <span style={{ fontSize:11, fontWeight:600, color:ACCENT }}>Response:</span>
+                      <p style={{ fontSize:12, color:MUTED, marginTop:4 }}>{r.response_text}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Notification Panel */}
+      <BottomSheet open={showNotifs} onClose={() => { setShowNotifs(false); markAllRead(); }} title="Notifications">
+        {notifications && notifications.length > 0 ? (
+          <div style={{ maxHeight:400, overflowY:'auto' }}>
+            {notifications.slice(0, 20).map(n => (
+              <div key={n.id} style={{ padding:'12px 0', borderBottom:`1px solid ${BORDER}`, opacity: n.read ? 0.6 : 1 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                  <span style={{ fontSize:14 }}>{n.type === 'success' ? '✅' : n.type === 'error' ? '❌' : '🔔'}</span>
+                  <span style={{ fontSize:14, fontWeight:600, flex:1 }}>{n.title}</span>
+                  {!n.read && <span style={{ width:8, height:8, borderRadius:4, background:ACCENT }} />}
+                </div>
+                <p style={{ fontSize:13, color:MUTED, lineHeight:1.4, marginLeft:26 }}>{n.body}</p>
+                <span style={{ fontSize:11, color:MUTED, marginLeft:26 }}>{n.time?.toLocaleTimeString?.() || ''}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon="🔔" title="No notifications" sub="You're all caught up!" />
+        )}
+      </BottomSheet>
+    </div>
+  );
+}
+
+// ─── SALON CARD ─────────────────────────────────────────────────────
+function SalonCard({ branch, avg, reviewCount, staffCount, onClick, isFav, onFav }) {
+  const colors = ['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
+  const bgColor = colors[branch.name?.length % colors.length] || ACCENT;
+
+  return (
+    <div onClick={onClick} style={{ flexShrink:0, width:220, background:CARD, borderRadius:20, overflow:'hidden',
+      border:`1px solid ${BORDER}`, cursor:'pointer', transition:'all .2s', boxShadow:'0 2px 12px rgba(0,0,0,.04)' }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+      <div style={{ height:120, background:`linear-gradient(135deg, ${bgColor}, ${bgColor}dd)`, position:'relative',
+        display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <span style={{ fontSize:40, opacity:.3 }}>✂</span>
+        <button onClick={e => { e.stopPropagation(); onFav(); }}
+          style={{ position:'absolute', top:10, right:10, background:'rgba(255,255,255,.8)', border:'none', borderRadius:50,
+            width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+          <Icon name="heart" size={16} color={isFav ? ROSE : '#999'} />
+        </button>
+      </div>
+      <div style={{ padding:14 }}>
+        <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>{branch.name}</h3>
+        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:MUTED, marginBottom:8 }}>
+          <Icon name="map" size={12} color={MUTED} />{branch.location || 'Lusaka'}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <Stars rating={Math.round(+avg)} size={12} />
+            <span style={{ fontSize:12, fontWeight:600 }}>{avg}</span>
+            <span style={{ fontSize:11, color:MUTED }}>({reviewCount})</span>
+          </div>
+          <span style={{ fontSize:11, color:MUTED }}>{staffCount} stylists</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// EXPLORE PAGE
+// ═══════════════════════════════════════════════════════════════════════
+
+
+export default function GlowBookClient() {
+  // ── AUTH STATE ──
+  const [authUser, setAuthUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
+
+  // ── APP STATE ──
+  const [page, setPage] = useState('home');
+  const [branches, setBranches] = useState([]);
+  const [services, setServices] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+  const [selectedBranch, setSelectedBranch] = useState(null);
+  const [selectedService, setSelectedService] = useState(null);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [bookingFlow, setBookingFlow] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [client, setClient] = useState({ id: null, name: 'Guest', phone: '', email: '' });
+  const [navHistory, setNavHistory] = useState([]);
+  const [favorites, setFavorites] = useState([]);
+
+  // ── AUTH CHECK ──
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user || null);
+      setAuthChecked(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user || null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setIsDemo(false);
+    setClient({ id: null, name: 'Guest', phone: '', email: '' });
+    setPage('home');
+  };
+
+  // ── DATA FETCH ──
+  const fetchAll = async (user) => {
+    setLoading(true);
+    try {
+      const [b, sv, st, cl, rv, bk] = await Promise.all([
+        supabase.from('branches').select('*').eq('is_active', true),
+        supabase.from('services').select('*').eq('is_active', true).order('category, name'),
+        supabase.from('staff').select('*').eq('is_active', true).order('name'),
+        supabase.from('clients').select('*'),
+        supabase.from('reviews').select('*').order('created_at', { ascending: false }),
+        supabase.from('bookings').select('*').order('booking_date', { ascending: false }),
+      ]);
+      setBranches(b.data || []);
+      setServices(sv.data || []);
+      setStaff(st.data || []);
+      setClients(cl.data || []);
+      setReviews(rv.data || []);
+      setBookings(bk.data || []);
+
+      // Find client profile linked to auth user
+      if (user) {
+        const linked = (cl.data || []).find(c => c.auth_user_id === user.id);
+        if (linked) setClient(linked);
+        else {
+          // Fallback: match by email
+          const byEmail = (cl.data || []).find(c => c.email === user.email);
+          if (byEmail) {
+            // Link this client to auth user
+            await supabase.from('clients').update({ auth_user_id: user.id }).eq('id', byEmail.id);
+            setClient({ ...byEmail, auth_user_id: user.id });
+          } else {
+            setClient({ id: null, name: user.user_metadata?.name || user.email, email: user.email, phone: '' });
+          }
+        }
+      } else if (cl.data?.length) {
+        // Demo mode: use first client
+        setClient(cl.data[0]);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (authChecked && (authUser || isDemo)) fetchAll(authUser);
+  }, [authChecked, authUser, isDemo]);
+
+  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
+
+  // ── NOTIFICATION CENTER ──
+  const [notifications, setNotifications] = useState([]);
+  const pushNotif = (title, body, type = 'info') => {
+    setNotifications(prev => [{ id: Date.now(), title, body, type, time: new Date(), read: false }, ...prev].slice(0, 50));
+  };
+  const unreadCount = notifications.filter(n => !n.read).length;
+  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+
+  // ── REAL-TIME SUBSCRIPTIONS ──
+  useEffect(() => {
+    if (!client?.id) return;
+    const channel = supabase.channel('client-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `client_id=eq.${client.id}` }, payload => {
+        if (payload.eventType === 'UPDATE') {
+          const b = payload.new;
+          if (b.status === 'confirmed') { showToast('Your booking was confirmed! ✅'); pushNotif('Booking Confirmed', `Your appointment on ${b.booking_date} at ${b.booking_time} has been confirmed`, 'success'); }
+          else if (b.status === 'cancelled' && b.cancelled_by === 'business') { showToast('A booking was cancelled by the salon', 'error'); pushNotif('Booking Cancelled', `Your appointment on ${b.booking_date} was cancelled by the salon`, 'error'); }
+          else if (b.status === 'completed') { pushNotif('Booking Complete', `Your appointment is done! Leave a review to earn GlowPoints ⭐`, 'success'); }
+        }
+        fetchAll();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reviews', filter: `client_id=eq.${client.id}` }, () => fetchAll())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [client?.id]);
+
+  // ── BOOKING REMINDERS ──
+  const [reminders, setReminders] = useState([]);
+  useEffect(() => {
+    if (!upcomingBookings.length) { setReminders([]); return; }
+    const now = new Date();
+    const rem = upcomingBookings.filter(b => {
+      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
+      const hoursUntil = (dt - now) / (1000 * 60 * 60);
+      return hoursUntil > 0 && hoursUntil <= 24;
+    }).map(b => {
+      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
+      const hoursUntil = Math.round((dt - new Date()) / (1000 * 60 * 60));
+      return { ...b, hoursUntil };
+    });
+    setReminders(rem);
+  }, [upcomingBookings]);
+
+  // ── NAVIGATION ──
+  const navigate = (pg, data) => {
+    setNavHistory(h => [...h, page]);
+    setPage(pg);
+    if (data?.branch) setSelectedBranch(data.branch);
+    if (data?.service) setSelectedService(data.service);
+    if (data?.booking) setSelectedBooking(data.booking);
+    if (data?.bookingFlow) setBookingFlow(data.bookingFlow);
+  };
+  const goBack = () => {
+    const prev = navHistory[navHistory.length - 1] || 'home';
+    setNavHistory(h => h.slice(0, -1));
+    setPage(prev);
+  };
+
+  // ── HELPERS ──
+  const getBranch = id => branches.find(b => b.id === id);
+  const getService = id => services.find(s => s.id === id);
+  const getStaffMember = id => staff.find(s => s.id === id);
+  const getClient = id => clients.find(c => c.id === id);
+  const branchReviews = bid => reviews.filter(r => r.branch_id === bid);
+  const branchStaff = bid => staff.filter(s => s.branch_id === bid);
+  const branchAvgRating = bid => {
+    const rv = branchReviews(bid);
+    return rv.length ? (rv.reduce((s, r) => s + (r.rating_overall || 0), 0) / rv.length).toFixed(1) : '—';
+  };
+  const clientBookings = bookings.filter(b => b.client_id === client?.id);
+  const upcomingBookings = clientBookings.filter(b => b.booking_date >= todayStr() && !['cancelled','completed','no_show'].includes(b.status));
+  const pastBookings = clientBookings.filter(b => b.status === 'completed' || b.status === 'no_show' || (b.booking_date < todayStr() && b.status !== 'cancelled'));
+  const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean))];
+
+  const toggleFav = bid => setFavorites(f => f.includes(bid) ? f.filter(x => x !== bid) : [...f, bid]);
+
+  // ── BOOKING ACTIONS ──
+  const cancelBooking = async (id) => {
+    // Cancellation policy enforcement
+    const bk = bookings.find(b => b.id === id);
+    if (bk) {
+      const br = branches.find(b => b.id === bk.branch_id);
+      const cancelHours = br?.cancellation_hours ?? 2;
+      const bookingDateTime = new Date(`${bk.booking_date}T${bk.booking_time || '00:00'}`);
+      const hoursUntil = (bookingDateTime - new Date()) / (1000 * 60 * 60);
+      if (hoursUntil < cancelHours && hoursUntil > 0) {
+        const feePercent = br?.cancellation_fee_percent || 0;
+        if (feePercent > 0) {
+          const fee = Math.round((bk.total_amount || 0) * feePercent / 100);
+          showToast(`Late cancellation — K${fee} fee (${feePercent}%) may apply`, 'error');
+        }
+      }
+    }
+    const { error } = await supabase.from('bookings').update({
+      status: 'cancelled', cancelled_at: new Date().toISOString(), cancellation_reason: 'Cancelled by client', cancelled_by: 'client', updated_at: new Date().toISOString()
+    }).eq('id', id);
+    if (!error) { showToast('Booking cancelled'); fetchAll(); }
+    else showToast('Failed to cancel', 'error');
+  };
+
+  const createBooking = async (flow) => {
+    // Double-booking check
+    if (flow.staff?.id) {
+      const { data: existing } = await supabase.from('bookings')
+        .select('id').eq('staff_id', flow.staff.id)
+        .eq('booking_date', flow.date).eq('booking_time', flow.time)
+        .neq('status', 'cancelled').limit(1);
+      if (existing?.length) {
+        showToast('This time slot was just booked. Please pick another.', 'error');
+        return;
+      }
+    }
+
+    // Rescheduling — update existing booking
+    if (flow.rescheduleId) {
+      const { error } = await supabase.from('bookings').update({
+        booking_date: flow.date, booking_time: flow.time, staff_id: flow.staff?.id || null,
+        status: 'pending', updated_at: new Date().toISOString(),
+      }).eq('id', flow.rescheduleId);
+      if (!error) { showToast('Booking rescheduled! 📅'); fetchAll(); setBookingFlow(null); setPage('bookings'); }
+      else showToast('Reschedule failed: ' + error.message, 'error');
+      return;
+    }
+    const svc = flow.service;
+    const pointsDiscount = flow.usePoints && flow.pointsToUse > 0 ? Math.floor(flow.pointsToUse / 10) : 0;
+    const rawAmount = svc.price_max || svc.price || 0;
+    const finalAmount = Math.max(0, rawAmount - pointsDiscount);
+    const baseData = {
+      branch_id: flow.branch.id, client_id: client.id,
+      service_id: svc.id, staff_id: flow.staff?.id || null,
+      booking_date: flow.date, booking_time: flow.time,
+      duration: svc.duration_max || svc.duration || 60,
+      total_amount: finalAmount,
+      discount_amount: pointsDiscount,
+      points_used: flow.pointsToUse || 0,
+      client_notes: flow.clientNotes || null,
+      status: 'pending',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    // Recurring bookings
+    if (flow.recurring && flow.recurringType) {
+      const recurringId = crypto.randomUUID();
+      const bookings = []; const weeks = flow.recurringType === 'weekly' ? 1 : flow.recurringType === 'biweekly' ? 2 : 4;
+      const until = flow.recurringUntil || new Date(new Date(flow.date).getTime() + weeks * 4 * 7 * 86400000).toISOString().slice(0,10);
+      let d = new Date(flow.date);
+      while (d.toISOString().slice(0,10) <= until) {
+        bookings.push({ ...baseData, booking_date: d.toISOString().slice(0,10), recurring_id: recurringId, recurring_type: flow.recurringType, recurring_until: until });
+        d = new Date(d.getTime() + weeks * 7 * 86400000);
+      }
+      const { error } = await supabase.from('bookings').insert(bookings);
+      if (!error) { showToast(`${bookings.length} recurring bookings created! 🎉`); fetchAll(); setBookingFlow(null); setPage('bookings'); }
+      else showToast('Booking failed: ' + error.message, 'error');
+    } else {
+      const { error } = await supabase.from('bookings').insert(baseData);
+      if (!error) {
+        // Deduct GlowPoints if used
+        if (flow.pointsToUse > 0 && client.id) {
+          await supabase.from('clients').update({ glow_points: Math.max(0, (client.glow_points || 0) - flow.pointsToUse) }).eq('id', client.id);
+        }
+        showToast('Booking confirmed! 🎉'); fetchAll(); setBookingFlow(null); setPage('bookings');
+      }
+      else {
+        const msg = error.message.includes('unique') || error.message.includes('duplicate') ? 'This time slot was just booked by someone else. Please choose another.' : error.message;
+        showToast('Booking failed: ' + msg, 'error');
+      }
+    }
+  };
+
+  // ═══ AUTH GATE ═══
+  if (!authChecked) return (
+    <div style={{ minHeight:'100vh', background:BG, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <style>{css}</style>
+      <div style={{ display:'flex', gap:6 }}>
+        {[0,1,2].map(i => <div key={i} style={{ width:8, height:8, borderRadius:4, background:ACCENT, animation:`pulse 1.2s ease ${i*.2}s infinite` }} />)}
+      </div>
+    </div>
+  );
+
+  if (!authUser && !isDemo) return (
+    <AuthScreen
+      onAuth={(user) => setAuthUser(user)}
+      onDemo={() => setIsDemo(true)}
+    />
+  );
+
+  // ═══ LOADING STATE ═══
+  if (loading) return (
+    <div style={{ minHeight:'100vh', background:BG, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
+      <div style={{ fontSize:36, fontFamily:'Fraunces,serif', fontWeight:700, color:ACCENT }}>GlowBook</div>
+      <div style={{ display:'flex', gap:6 }}>
+        {[0,1,2].map(i => <div key={i} style={{ width:8, height:8, borderRadius:4, background:ACCENT, animation:`pulse 1.2s ease ${i*.2}s infinite` }} />)}
+      </div>
+    </div>
+  );
+
+  // ═══ RENDER PAGES ═══
+  const pages = {
+    home: <HomePage {...{ branches, services, reviews, staff, branchAvgRating, branchReviews, categories, selectedCategory, setSelectedCategory, searchQuery, setSearchQuery, navigate, favorites, toggleFav, reminders, getService: id => services.find(s => s.id === id), getBranch: id => branches.find(b => b.id === id), notifications, unreadCount, markAllRead }} />,
+    explore: <ExplorePage {...{ branches, services, reviews, branchAvgRating, branchReviews, navigate, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory, categories, favorites, toggleFav }} />,
+    salon: <SalonPage {...{ branch: selectedBranch, services, reviews: branchReviews(selectedBranch?.id), staff: branchStaff(selectedBranch?.id), branchAvgRating, navigate, goBack, favorites, toggleFav, getClient, client }} />,
+    booking: <BookingFlow {...{ flow: {...bookingFlow, clientId: client?.id}, setBookingFlow, staff: branchStaff(bookingFlow?.branch?.id), services, createBooking, goBack, navigate }} />,
+    bookings: <MyBookingsPage {...{ upcoming: upcomingBookings, past: pastBookings, getService, getStaffMember, getBranch, cancelBooking, rescheduleBooking: (bk) => {
+      const svc = getService(bk.service_id); const br = getBranch(bk.branch_id); const stf = getStaffMember(bk.staff_id);
+      setBookingFlow({ step: 2, branch: br, service: svc, staff: stf || { id: null, name: 'Any Available' }, date: null, time: null, rescheduleId: bk.id, clientPoints: client?.glow_points || 0 });
+      setPage('booking');
+    }, navigate, selectedBooking, setSelectedBooking }} />,
+    profile: <ProfilePage {...{ client, clientBookings, branches, favorites, getBranch, navigate, showToast, authUser, isDemo, handleLogout }} />,
+  };
+
+  return (
+    <div style={{ minHeight:'100vh', background:BG, maxWidth:480, margin:'0 auto', position:'relative', paddingBottom:72 }}>
+      <style>{css}</style>
+      {pages[page] || pages.home}
+      {/* Bottom Nav */}
+      <nav style={{ position:'fixed', bottom:0, left:'50%', transform:'translateX(-50%)', width:'100%', maxWidth:480,
+        background:'rgba(255,255,255,.92)', backdropFilter:'blur(16px)', borderTop:`1px solid ${BORDER}`,
+        display:'flex', justifyContent:'space-around', padding:'8px 0 env(safe-area-inset-bottom, 8px)', zIndex:900 }}>
+        {[
+          { id:'home', icon:'home', label:'Home' },
+          { id:'explore', icon:'search', label:'Explore' },
+          { id:'bookings', icon:'calendar', label:'Bookings' },
+          { id:'profile', icon:'user', label:'Profile' },
+        ].map(n => (
+          <button key={n.id} onClick={() => { setNavHistory([]); setPage(n.id); }}
+            style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, background:'none', border:'none',
+              cursor:'pointer', padding:'4px 16px', borderRadius:12, transition:'all .2s',
+              color: page === n.id ? ACCENT : MUTED }}>
+            <Icon name={n.icon} size={22} color={page === n.id ? ACCENT : MUTED} />
+            <span style={{ fontSize:11, fontWeight: page === n.id ? 700 : 500 }}>{n.label}</span>
+          </button>
+        ))}
+      </nav>
+      {toast && <Toast message={toast.msg} type={toast.type} />}
+    </div>
+  );
+}
+
