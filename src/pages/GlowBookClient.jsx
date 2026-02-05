@@ -1419,6 +1419,43 @@ function ProfilePage({ client, clientBookings, branches, favorites, getBranch, n
   );
 }
 
+// ─── SALON CARD ─────────────────────────────────────────────────────
+function SalonCard({ branch, avg, reviewCount, staffCount, onClick, isFav, onFav }) {
+  const colors = ['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
+  const bgColor = colors[branch.name?.length % colors.length] || '#c47d5a';
+
+  return (
+    <div onClick={onClick} style={{ flexShrink:0, width:220, background:'#ffffff', borderRadius:20, overflow:'hidden',
+      border:'1px solid #ede8e4', cursor:'pointer', transition:'all .2s', boxShadow:'0 2px 12px rgba(0,0,0,.04)' }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+      <div style={{ height:120, background:`linear-gradient(135deg, ${bgColor}, ${bgColor}dd)`, position:'relative',
+        display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <span style={{ fontSize:40, opacity:.3 }}>✂</span>
+        <button onClick={e => { e.stopPropagation(); onFav(); }}
+          style={{ position:'absolute', top:10, right:10, background:'rgba(255,255,255,.8)', border:'none', borderRadius:50,
+            width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+          <Icon name="heart" size={16} color={isFav ? '#d4728c' : '#999'} />
+        </button>
+      </div>
+      <div style={{ padding:14 }}>
+        <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>{branch.name}</h3>
+        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'#8a7e7a', marginBottom:8 }}>
+          <Icon name="map" size={12} color="#8a7e7a" />{branch.location || 'Lusaka'}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <Stars rating={Math.round(+avg)} size={12} />
+            <span style={{ fontSize:12, fontWeight:600 }}>{avg}</span>
+            <span style={{ fontSize:11, color:'#8a7e7a' }}>({reviewCount})</span>
+          </div>
+          <span style={{ fontSize:11, color:'#8a7e7a' }}>{staffCount} stylists</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomePage({ branches, services, reviews, staff, branchAvgRating, branchReviews, categories, selectedCategory, setSelectedCategory, searchQuery, setSearchQuery, navigate, favorites, toggleFav, reminders, getService, getBranch, notifications, unreadCount, markAllRead }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const topBranches = [...branches].sort((a, b) => {
@@ -1578,49 +1615,6 @@ function HomePage({ branches, services, reviews, staff, branchAvgRating, branchR
     </div>
   );
 }
-
-// ─── SALON CARD ─────────────────────────────────────────────────────
-function SalonCard({ branch, avg, reviewCount, staffCount, onClick, isFav, onFav }) {
-  const colors = ['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
-  const bgColor = colors[branch.name?.length % colors.length] || ACCENT;
-
-  return (
-    <div onClick={onClick} style={{ flexShrink:0, width:220, background:CARD, borderRadius:20, overflow:'hidden',
-      border:`1px solid ${BORDER}`, cursor:'pointer', transition:'all .2s', boxShadow:'0 2px 12px rgba(0,0,0,.04)' }}
-      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
-      onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-      <div style={{ height:120, background:`linear-gradient(135deg, ${bgColor}, ${bgColor}dd)`, position:'relative',
-        display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <span style={{ fontSize:40, opacity:.3 }}>✂</span>
-        <button onClick={e => { e.stopPropagation(); onFav(); }}
-          style={{ position:'absolute', top:10, right:10, background:'rgba(255,255,255,.8)', border:'none', borderRadius:50,
-            width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
-          <Icon name="heart" size={16} color={isFav ? ROSE : '#999'} />
-        </button>
-      </div>
-      <div style={{ padding:14 }}>
-        <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>{branch.name}</h3>
-        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:MUTED, marginBottom:8 }}>
-          <Icon name="map" size={12} color={MUTED} />{branch.location || 'Lusaka'}
-        </div>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <Stars rating={Math.round(+avg)} size={12} />
-            <span style={{ fontSize:12, fontWeight:600 }}>{avg}</span>
-            <span style={{ fontSize:11, color:MUTED }}>({reviewCount})</span>
-          </div>
-          <span style={{ fontSize:11, color:MUTED }}>{staffCount} stylists</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// EXPLORE PAGE
-// ═══════════════════════════════════════════════════════════════════════
-
-
 export default function GlowBookClient() {
   // ── AUTH STATE ──
   const [authUser, setAuthUser] = useState(null);
@@ -1951,4 +1945,3 @@ export default function GlowBookClient() {
     </div>
   );
 }
-
