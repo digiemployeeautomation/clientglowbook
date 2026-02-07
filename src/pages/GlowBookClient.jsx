@@ -1231,12 +1231,12 @@ function ProfilePage({ client, clientBookings, branches, favorites, getBranch, n
   const unreviewedBookings = clientBookings.filter(b => b.status === 'completed' && !b._reviewed);
   // Check which completed bookings have reviews
   const [reviewedIds, setReviewedIds] = useState(new Set());
-  useState(() => {
+  useEffect(() => {
     (async () => {
       const { data } = await supabase.from('reviews').select('booking_id').eq('client_id', client.id);
       if (data) setReviewedIds(new Set(data.map(r => r.booking_id)));
     })();
-  });
+  }, [client.id]);
   const pendingReviews = clientBookings.filter(b => b.status === 'completed' && !reviewedIds.has(b.id));
 
   const StarRow = ({ value, onChange, label }) => (
@@ -1735,38 +1735,6 @@ export default function GlowBookClient() {
     return () => { supabase.removeChannel(channel); };
   }, [client?.id]);
 
-  // ── BOOKING REMINDERS ──
-  const [reminders, setReminders] = useState([]);
-  useEffect(() => {
-    if (!upcomingBookings.length) { setReminders([]); return; }
-    const now = new Date();
-    const rem = upcomingBookings.filter(b => {
-      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
-      const hoursUntil = (dt - now) / (1000 * 60 * 60);
-      return hoursUntil > 0 && hoursUntil <= 24;
-    }).map(b => {
-      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
-      const hoursUntil = Math.round((dt - new Date()) / (1000 * 60 * 60));
-      return { ...b, hoursUntil };
-    });
-    setReminders(rem);
-  }, [upcomingBookings]);
-
-  // ── NAVIGATION ──
-  const navigate = (pg, data) => {
-    setNavHistory(h => [...h, page]);
-    setPage(pg);
-    if (data?.branch) setSelectedBranch(data.branch);
-    if (data?.service) setSelectedService(data.service);
-    if (data?.booking) setSelectedBooking(data.booking);
-    if (data?.bookingFlow) setBookingFlow(data.bookingFlow);
-  };
-  const goBack = () => {
-    const prev = navHistory[navHistory.length - 1] || 'home';
-    setNavHistory(h => h.slice(0, -1));
-    setPage(prev);
-  };
-
   // ── HELPERS ──
   const getBranch = id => branches.find(b => b.id === id);
   const getService = id => services.find(s => s.id === id);
@@ -1782,6 +1750,38 @@ export default function GlowBookClient() {
   const upcomingBookings = clientBookings.filter(b => b.booking_date >= todayStr() && !['cancelled','completed','no_show'].includes(b.status));
   const pastBookings = clientBookings.filter(b => b.status === 'completed' || b.status === 'no_show' || (b.booking_date < todayStr() && b.status !== 'cancelled'));
   const categories = ['All', ...new Set(services.map(s => s.category).filter(Boolean))];
+
+  // ── BOOKING REMINDERS ──
+  const [reminders, setReminders] = useState([]);
+  useEffect(() => {
+    if (!upcomingBookings.length) { setReminders([]); return; }
+    const now = new Date();
+    const rem = upcomingBookings.filter(b => {
+      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
+      const hoursUntil = (dt - now) / (1000 * 60 * 60);
+      return hoursUntil > 0 && hoursUntil <= 24;
+    }).map(b => {
+      const dt = new Date(`${b.booking_date}T${b.booking_time || '09:00'}`);
+      const hoursUntil = Math.round((dt - new Date()) / (1000 * 60 * 60));
+      return { ...b, hoursUntil };
+    });
+    setReminders(rem);
+  }, [upcomingBookings.length]);
+
+  // ── NAVIGATION ──
+  const navigate = (pg, data) => {
+    setNavHistory(h => [...h, page]);
+    setPage(pg);
+    if (data?.branch) setSelectedBranch(data.branch);
+    if (data?.service) setSelectedService(data.service);
+    if (data?.booking) setSelectedBooking(data.booking);
+    if (data?.bookingFlow) setBookingFlow(data.bookingFlow);
+  };
+  const goBack = () => {
+    const prev = navHistory[navHistory.length - 1] || 'home';
+    setNavHistory(h => h.slice(0, -1));
+    setPage(prev);
+  };
 
   const toggleFav = bid => setFavorites(f => f.includes(bid) ? f.filter(x => x !== bid) : [...f, bid]);
 
