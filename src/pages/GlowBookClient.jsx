@@ -48,6 +48,7 @@ const css = `
   @keyframes slideIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
   @keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
   .fade-up{animation:fadeUp .35s ease both}
   .slide-up{animation:slideUp .3s cubic-bezier(.16,1,.3,1) both}
   ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:${BORDER};border-radius:3px}
@@ -551,7 +552,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
   );
 }
 
-function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp}) {
+function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,client,paymentState,setPaymentState}) {
   if(!flow) return null;
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
@@ -694,8 +695,24 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                     <span style={{fontSize:14,color:MUTED}}>Total</span>
                     <span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{flow.service?.price_max||flow.service?.price||0}</span>
                   </div>
+                  {parseFloat(flow.service?.deposit)>0&&(
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,borderTop:`1px dashed ${BORDER}`,marginTop:12}}>
+                      <span style={{fontSize:14,fontWeight:600,color:DARK}}>Deposit (pay now)</span>
+                      <span style={{fontSize:20,fontWeight:700,fontFamily:'Fraunces,serif',color:'#2e7d32'}}>K{flow.service?.deposit}</span>
+                    </div>
+                  )}
                 </div>
               </div>
+              {parseFloat(flow.service?.deposit)>0&&(
+                <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
+                  <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>📱 Mobile Money Number</div>
+                  <div style={{fontSize:12,color:MUTED,marginBottom:10,lineHeight:1.5}}>Enter the number to pay from. You'll receive a USSD prompt to approve <strong>K{flow.service?.deposit}</strong>.</div>
+                  <input value={flow.payerPhone||client?.phone||''} onChange={e=>update({payerPhone:e.target.value})} placeholder="e.g. 0971234567" style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:15,background:BG,color:DARK,fontFamily:'inherit',letterSpacing:0.5}} />
+                  <div style={{display:'flex',gap:6,marginTop:8}}>
+                    {['MTN','Airtel','Zamtel'].map(n=><span key={n} style={{fontSize:10,fontWeight:600,color:MUTED,padding:'3px 8px',borderRadius:6,background:BG,border:`1px solid ${BORDER}`}}>{n}</span>)}
+                  </div>
+                </div>
+              )}
               <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                 <div style={{fontSize:14,fontWeight:600,marginBottom:8}}>Special Requests</div>
                 <textarea value={flow.clientNotes||''} onChange={e=>update({clientNotes:e.target.value})} placeholder="E.g. shoulder-length braids..." rows={3} style={{width:'100%',padding:'10px 12px',borderRadius:10,border:`1.5px solid ${BORDER}`,fontSize:13,background:BG,color:DARK,resize:'vertical',fontFamily:'inherit',minHeight:80}}/>
@@ -725,14 +742,55 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               </div>
               <div style={{display:'flex',gap:10}}>
                 <Btn variant="secondary" onClick={()=>update({step:2})}>← Back</Btn>
-                <Btn variant="primary" full onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
-                  {flow.recurring?`Book ${flow.recurringType||'Weekly'} ✨`:'Confirm Booking ✨'}
+                <Btn variant="primary" full disabled={!!paymentState||(parseFloat(flow.service?.deposit)>0&&!(flow.payerPhone||client?.phone))} onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
+                  {parseFloat(flow.service?.deposit)>0 ? `Pay K${flow.service.deposit} & Book 💳` : flow.recurring?`Book ${flow.recurringType||'Weekly'} ✨`:'Confirm Booking ✨'}
                 </Btn>
               </div>
             </div>
           </div>
         )}
       </div>
+      {/* Payment Processing Overlay */}
+      {paymentState && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20,backdropFilter:'blur(4px)'}}>
+          <div style={{background:CARD,borderRadius:24,padding:32,maxWidth:380,width:'100%',textAlign:'center',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}}>
+            {paymentState.step==='failed'?(
+              <>
+                <div style={{width:64,height:64,borderRadius:32,background:'#fce8e8',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',fontSize:28}}>❌</div>
+                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>Payment Failed</h3>
+                <p style={{fontSize:14,color:MUTED,lineHeight:1.6,marginBottom:20}}>{paymentState.message}</p>
+                <div style={{display:'flex',gap:10}}>
+                  <Btn variant="secondary" full onClick={()=>setPaymentState(null)}>Go Back</Btn>
+                  <Btn variant="primary" full onClick={()=>{setPaymentState(null);createBooking(flow)}}>Try Again</Btn>
+                </div>
+              </>
+            ):paymentState.step==='success'?(
+              <>
+                <div style={{width:64,height:64,borderRadius:32,background:'#e8f5e9',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',fontSize:28}}>✅</div>
+                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>Payment Received!</h3>
+                <p style={{fontSize:14,color:MUTED}}>Creating your booking...</p>
+              </>
+            ):(
+              <>
+                <div style={{width:64,height:64,borderRadius:32,background:`${ACCENT}15`,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+                  <div style={{width:32,height:32,border:`3px solid ${BORDER}`,borderTopColor:ACCENT,borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
+                </div>
+                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>
+                  {paymentState.step==='initiating'?'Initiating Payment...':'Waiting for Approval'}
+                </h3>
+                <p style={{fontSize:14,color:MUTED,lineHeight:1.6,marginBottom:6}}>{paymentState.message}</p>
+                {paymentState.step==='waiting'&&(
+                  <div style={{background:BG,borderRadius:12,padding:14,marginTop:12,border:`1px solid ${BORDER}`}}>
+                    <div style={{fontSize:12,fontWeight:600,color:DARK,marginBottom:4}}>📱 Check your phone</div>
+                    <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K{flow.service?.deposit} deposit payment.</div>
+                  </div>
+                )}
+                <button onClick={()=>setPaymentState(null)} style={{marginTop:16,background:'none',border:'none',color:MUTED,fontSize:13,cursor:'pointer',textDecoration:'underline'}}>Cancel</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -940,6 +998,7 @@ export default function GlowBookClient() {
   const [toast,setToast] = useState(null);
   const [selectedBranch,setSelectedBranch] = useState(null);
   const [bookingFlow,setBookingFlow] = useState(null);
+  const [paymentState,setPaymentState] = useState(null); // null | {step:'initiating'|'waiting'|'verifying'|'success'|'failed', message, paymentId}
   const [searchQuery,setSearchQuery] = useState('');
   const [selectedCategory,setSelectedCategory] = useState('All');
   const [client,setClient] = useState({id:null,name:'Guest',phone:'',email:''});
@@ -1039,40 +1098,158 @@ export default function GlowBookClient() {
     if(!error){showToastFn('Booking cancelled');fetchAll()}else showToastFn('Failed','error');
   };
 
+  const SUPABASE_URL = supabase.supabaseUrl || 'https://yvupvtnpnrelbxgmwguy.supabase.co';
+
   const createBooking = async (flow) => {
+    const svc = flow.service;
+    const deposit = parseFloat(svc?.deposit) || 0;
+    const payerPhone = flow.payerPhone || client.phone || '';
+
     // Double-booking guard
     if(flow.staff?.id){
       const{data:ex}=await supabase.from('bookings').select('id').eq('staff_id',flow.staff.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled').limit(1);
       if(ex?.length){showToastFn('Slot just booked — pick another','error');return}
     }else{
-      // "Any Available" - check if all staff are booked at this slot
       const branchStaff=staff.filter(s=>s.branch_id===flow.branch?.id&&s.is_active!==false);
       const{data:ex}=await supabase.from('bookings').select('id').eq('branch_id',flow.branch.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled');
       if((ex?.length||0)>=Math.max(branchStaff.length,1)){showToastFn('All stylists booked at this time — pick another','error');return}
     }
+
+    // Reschedule — no payment needed
     if(flow.rescheduleId){
       const{error}=await supabase.from('bookings').update({booking_date:flow.date,booking_time:flow.time,staff_id:flow.staff?.id||null,status:'pending',updated_at:new Date().toISOString()}).eq('id',flow.rescheduleId);
       if(!error){showToastFn('Rescheduled! 📅');fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');return;
     }
-    const svc=flow.service;
-    const baseData={branch_id:flow.branch.id,client_id:client.id,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:svc.price_max||svc.price||0,client_notes:flow.clientNotes||null,status:'pending',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
-    if(flow.recurring&&flow.recurringType){
-      const rid=crypto.randomUUID();const weeks=flow.recurringType==='weekly'?1:flow.recurringType==='biweekly'?2:4;
-      const until=flow.recurringUntil||new Date(new Date(flow.date).getTime()+weeks*4*7*86400000).toISOString().slice(0,10);
-      // Check availability for all recurring dates
-      const allDates=[];let d=new Date(flow.date);while(d.toISOString().slice(0,10)<=until){allDates.push(d.toISOString().slice(0,10));d=new Date(d.getTime()+weeks*7*86400000)}
-      const{data:existing}=await supabase.from('bookings').select('booking_date,booking_time').eq('branch_id',flow.branch.id).eq('booking_time',flow.time).in('booking_date',allDates).neq('status','cancelled');
-      const conflictDates=new Set((existing||[]).map(b=>b.booking_date));
-      const bks=allDates.filter(dt=>!conflictDates.has(dt)).map(dt=>({...baseData,booking_date:dt,recurring_id:rid,recurring_type:flow.recurringType,recurring_until:until}));
-      if(!bks.length){showToastFn('All recurring dates are already booked','error');return}
-      const skipped=allDates.length-bks.length;
-      const{error}=await supabase.from('bookings').insert(bks);
-      if(!error){showToastFn(`${bks.length} bookings created!${skipped?' ('+skipped+' skipped — conflicts)':''} 🎉`);fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');
-    }else{
-      const{error}=await supabase.from('bookings').insert(baseData);
-      if(!error){showToastFn('Booking confirmed! 🎉');fetchAll();setBookingFlow(null);setPage('bookings')}
-      else showToastFn('Failed: '+error.message,'error');
+
+    // If deposit required, initiate payment first
+    if (deposit > 0) {
+      if (!payerPhone) { showToastFn('Enter your mobile money number to pay', 'error'); return; }
+
+      setPaymentState({ step: 'initiating', message: 'Initiating payment...' });
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const apiKey = supabase.supabaseKey || '';
+        const res = await fetch(SUPABASE_URL + '/functions/v1/process-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || ''), 'apikey': apiKey },
+          body: JSON.stringify({
+            action: 'initiate',
+            client_id: client.id,
+            branch_id: flow.branch.id,
+            amount: deposit,
+            payer_phone: payerPhone,
+            payment_type: 'booking_deposit'
+          })
+        });
+        const data = await res.json();
+
+        if (data.error || !data.success) {
+          setPaymentState({ step: 'failed', message: data.error || 'Payment initiation failed' });
+          return;
+        }
+
+        // Payment initiated — now poll for verification
+        setPaymentState({ step: 'waiting', message: 'Approve the payment on your phone...', paymentId: data.payment_id });
+
+        const paymentId = data.payment_id;
+        let attempts = 0;
+        const maxAttempts = 24; // 2 minutes (5s intervals)
+
+        const pollVerify = async () => {
+          attempts++;
+          setPaymentState(ps => ({ ...ps, step: 'verifying', message: `Checking payment... (${attempts}/${maxAttempts})` }));
+
+          try {
+            const vRes = await fetch(SUPABASE_URL + '/functions/v1/process-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || ''), 'apikey': apiKey },
+              body: JSON.stringify({ action: 'verify', payment_id: paymentId })
+            });
+            const vData = await vRes.json();
+
+            if (vData.status === 'successful') {
+              setPaymentState({ step: 'success', message: 'Payment received! Creating booking...' });
+
+              // Create the booking(s) now
+              await createBookingRecords(flow, svc, paymentId, deposit);
+              return;
+            }
+
+            if (vData.status === 'failed') {
+              setPaymentState({ step: 'failed', message: vData.message || 'Payment was declined. Please try again.' });
+              return;
+            }
+
+            // Still pending
+            if (attempts >= maxAttempts) {
+              setPaymentState({ step: 'failed', message: 'Payment timed out. If money was deducted, please contact support.' });
+              return;
+            }
+
+            // Continue polling
+            setPaymentState(ps => ({ ...ps, step: 'waiting', message: 'Approve the payment on your phone...' }));
+            setTimeout(pollVerify, 5000);
+          } catch (e) {
+            setPaymentState({ step: 'failed', message: 'Verification error: ' + e.message });
+          }
+        };
+
+        // Start polling after 5 seconds
+        setTimeout(pollVerify, 5000);
+
+      } catch (e) {
+        setPaymentState({ step: 'failed', message: 'Error: ' + e.message });
+      }
+    } else {
+      // No deposit — create booking directly
+      await createBookingRecords(flow, svc, null, 0);
     }
+  };
+
+  const createBookingRecords = async (flow, svc, paymentId, depositAmount) => {
+    const baseData = {
+      branch_id: flow.branch.id, client_id: client.id, service_id: svc.id,
+      staff_id: flow.staff?.id || null, booking_date: flow.date, booking_time: flow.time,
+      duration: svc.duration_max || svc.duration || 60, total_amount: svc.price_max || svc.price || 0,
+      deposit_amount: depositAmount || 0, deposit_paid: depositAmount > 0, deposit_paid_at: depositAmount > 0 ? new Date().toISOString() : null,
+      payment_id: paymentId || null, payment_status: depositAmount > 0 ? 'paid' : 'unpaid',
+      client_notes: flow.clientNotes || null, status: depositAmount > 0 ? 'confirmed' : 'pending',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    };
+
+    if (flow.recurring && flow.recurringType) {
+      const rid = crypto.randomUUID();
+      const weeks = flow.recurringType === 'weekly' ? 1 : flow.recurringType === 'biweekly' ? 2 : 4;
+      const until = flow.recurringUntil || new Date(new Date(flow.date).getTime() + weeks * 4 * 7 * 86400000).toISOString().slice(0, 10);
+      const allDates = []; let d = new Date(flow.date);
+      while (d.toISOString().slice(0, 10) <= until) { allDates.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + weeks * 7 * 86400000); }
+      const { data: existing } = await supabase.from('bookings').select('booking_date,booking_time').eq('branch_id', flow.branch.id).eq('booking_time', flow.time).in('booking_date', allDates).neq('status', 'cancelled');
+      const conflictDates = new Set((existing || []).map(b => b.booking_date));
+      const bks = allDates.filter(dt => !conflictDates.has(dt)).map((dt, i) => ({
+        ...baseData, booking_date: dt, recurring_id: rid, recurring_type: flow.recurringType, recurring_until: until,
+        // Only first booking has the deposit payment
+        deposit_paid: i === 0 ? baseData.deposit_paid : false,
+        deposit_paid_at: i === 0 ? baseData.deposit_paid_at : null,
+        payment_id: i === 0 ? baseData.payment_id : null,
+        payment_status: i === 0 ? baseData.payment_status : 'unpaid',
+        status: i === 0 ? baseData.status : 'pending'
+      }));
+      if (!bks.length) { showToastFn('All recurring dates are already booked', 'error'); setPaymentState(null); return; }
+      const skipped = allDates.length - bks.length;
+      const { error } = await supabase.from('bookings').insert(bks);
+      if (!error) { showToastFn(`${bks.length} bookings created!${skipped ? ' (' + skipped + ' skipped — conflicts)' : ''} 🎉`); fetchAll(); setBookingFlow(null); setPage('bookings'); }
+      else showToastFn('Failed: ' + error.message, 'error');
+    } else {
+      const { data: newBooking, error } = await supabase.from('bookings').insert(baseData).select('id').single();
+      if (!error && newBooking) {
+        // Link payment to booking
+        if (paymentId) await supabase.from('payments').update({ booking_id: newBooking.id }).eq('id', paymentId);
+        showToastFn('Booking confirmed! 🎉'); fetchAll(); setBookingFlow(null); setPage('bookings');
+      }
+      else showToastFn('Failed: ' + (error?.message || 'Unknown error'), 'error');
+    }
+    setPaymentState(null);
   };
 
   const rescheduleBooking = (bk) => {
@@ -1090,7 +1267,7 @@ export default function GlowBookClient() {
     home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}}/>,
     explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}}/>,
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id||!s.branch_id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp}}/>,
-    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp}}/>,
+    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp,client,paymentState,setPaymentState}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp}}/>,
     profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp}}/>,
   };
