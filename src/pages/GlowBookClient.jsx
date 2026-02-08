@@ -551,7 +551,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
   );
 }
 
-function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,fetchAll,showToastFn}) {
+function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp}) {
   if(!flow) return null;
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
@@ -589,13 +589,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
 
   const dates=[];for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);dates.push(d.toISOString().slice(0,10))}
   const grouped={};services.forEach(s=>{if(!grouped[s.category])grouped[s.category]=[];grouped[s.category].push(s)});
-  const steps=[{label:'Service'},{label:'Stylist'},{label:'Date & Time'},{label:'Confirm'},{label:'Payment'}];
-  const SUPABASE_URL = supabase.supabaseUrl || 'https://yvupvtnpnrelbxgmwguy.supabase.co';
-  const [payerPhone,setPayerPhone] = useState('');
-  const [paymentLoading,setPaymentLoading] = useState(false);
-  const [paymentStatus,setPaymentStatus] = useState(null); // null | 'initiated' | 'polling' | 'successful' | 'failed'
-  const [paymentId,setPaymentId] = useState(null);
-  const [paymentError,setPaymentError] = useState('');
+  const steps=[{label:'Service'},{label:'Stylist'},{label:'Date & Time'},{label:'Confirm'}];
 
   return (
     <div className="fade-up">
@@ -731,137 +725,11 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               </div>
               <div style={{display:'flex',gap:10}}>
                 <Btn variant="secondary" onClick={()=>update({step:2})}>← Back</Btn>
-                <Btn variant="primary" full onClick={()=>update({step:4})} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
-                  Proceed to Payment →
+                <Btn variant="primary" full onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
+                  {flow.recurring?`Book ${flow.recurringType||'Weekly'} ✨`:'Confirm Booking ✨'}
                 </Btn>
               </div>
             </div>
-          </div>
-        )}
-        {step===4&&(
-          <div className="fade-up">
-            <h3 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:6}}>Pay K{flow.service?.price_max||flow.service?.price||100}</h3>
-            <p style={{fontSize:13,color:MUTED,marginBottom:20}}>Pay via mobile money to confirm your booking</p>
-
-            {paymentStatus==='successful'?(
-              <div style={{textAlign:'center',padding:'40px 20px'}}>
-                <div style={{width:72,height:72,borderRadius:36,background:'#e8f5e9',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',fontSize:36}}>✓</div>
-                <h4 style={{fontSize:20,fontWeight:700,marginBottom:8,fontFamily:'Fraunces,serif'}}>Payment Successful!</h4>
-                <p style={{fontSize:14,color:MUTED,marginBottom:24}}>Your booking has been confirmed</p>
-                <Btn variant="primary" full onClick={()=>{setPaymentStatus(null);setPaymentId(null);setPayerPhone('');setBookingFlow(null);goBack()}}>Done ✨</Btn>
-              </div>
-            ):paymentStatus==='failed'?(
-              <div style={{textAlign:'center',padding:'40px 20px'}}>
-                <div style={{width:72,height:72,borderRadius:36,background:'#fce4ec',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',fontSize:36}}>✕</div>
-                <h4 style={{fontSize:20,fontWeight:700,marginBottom:8,fontFamily:'Fraunces,serif',color:'#c62828'}}>Payment Failed</h4>
-                <p style={{fontSize:14,color:MUTED,marginBottom:8}}>{paymentError||'The payment was not completed.'}</p>
-                <p style={{fontSize:13,color:MUTED,marginBottom:24}}>Please try again or use a different number.</p>
-                <div style={{display:'flex',gap:10}}><Btn variant="secondary" onClick={()=>{setPaymentStatus(null);setPaymentError('')}}>Try Again</Btn><Btn variant="ghost" onClick={()=>update({step:3})}>← Back</Btn></div>
-              </div>
-            ):(paymentStatus==='initiated'||paymentStatus==='polling')?(
-              <div style={{textAlign:'center',padding:'40px 20px'}}>
-                <div style={{display:'flex',gap:6,justifyContent:'center',marginBottom:20}}>{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:5,background:ACCENT,animation:`pulse 1.2s ease ${i*.2}s infinite`}}/>)}</div>
-                <h4 style={{fontSize:18,fontWeight:700,marginBottom:8,fontFamily:'Fraunces,serif'}}>Waiting for Payment</h4>
-                <p style={{fontSize:14,color:MUTED,marginBottom:8}}>A USSD prompt has been sent to</p>
-                <p style={{fontSize:16,fontWeight:700,marginBottom:16}}>{payerPhone}</p>
-                <p style={{fontSize:13,color:MUTED}}>Please approve the payment on your phone.</p>
-                <p style={{fontSize:12,color:MUTED,marginTop:20}}>This will automatically update once confirmed...</p>
-              </div>
-            ):(
-              <div>
-                <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:20,marginBottom:16}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingBottom:14,borderBottom:`1px solid ${BORDER}`,marginBottom:14}}>
-                    <span style={{fontSize:14,color:MUTED}}>Service</span><span style={{fontSize:14,fontWeight:600}}>{flow.service?.name}</span>
-                  </div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingBottom:14,borderBottom:`1px solid ${BORDER}`,marginBottom:14}}>
-                    <span style={{fontSize:14,color:MUTED}}>Date & Time</span><span style={{fontSize:14,fontWeight:600}}>{flow.date?fmtDate(flow.date):''} · {flow.time?fmtTime(flow.time):''}</span>
-                  </div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                    <span style={{fontSize:16,fontWeight:600}}>Amount to Pay</span><span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{flow.service?.price_max||flow.service?.price||100}</span>
-                  </div>
-                </div>
-
-                <div style={{background:`${GOLD}08`,borderRadius:12,padding:14,marginBottom:16,border:`1px solid ${GOLD}20`}}>
-                  <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>
-                    <strong style={{color:DARK}}>How it works:</strong> Enter your mobile money number below. You'll receive a USSD prompt on your phone to approve the payment. Once confirmed, your booking is automatically secured.
-                  </div>
-                </div>
-
-                <div style={{marginBottom:16}}>
-                  <label style={{fontSize:14,fontWeight:600,marginBottom:8,display:'block'}}>Mobile Money Number</label>
-                  <input value={payerPhone} onChange={e=>setPayerPhone(e.target.value)} placeholder="e.g. 0971234567" type="tel" style={{width:'100%',padding:'14px 16px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:16,background:BG,color:DARK,fontWeight:600,letterSpacing:1}}/>
-                  <p style={{fontSize:11,color:MUTED,marginTop:6}}>Works with MTN, Airtel, and Zamtel</p>
-                </div>
-
-                {paymentError&&<div style={{background:'#fce4ec',borderRadius:10,padding:12,marginBottom:16,fontSize:13,color:'#c62828',fontWeight:500}}>{paymentError}</div>}
-
-                <div style={{display:'flex',gap:10}}>
-                  <Btn variant="ghost" onClick={()=>update({step:3})}>← Back</Btn>
-                  <Btn variant="primary" full disabled={!payerPhone||payerPhone.length<10||paymentLoading} onClick={async()=>{
-                    setPaymentLoading(true);setPaymentError('');
-                    try {
-                      const amount = flow.service?.price_max||flow.service?.price||100;
-                      const svc=flow.service;
-                      const baseData={branch_id:flow.branch.id,client_id:flow.clientId,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:amount,client_notes:flow.clientNotes||null,status:'pending',payment_status:'pending',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
-                      const {data:bkData,error:bkErr}=await supabase.from('bookings').insert(baseData).select().single();
-                      if(bkErr) throw new Error(bkErr.message);
-
-                      const {data:{session}}=await supabase.auth.getSession();
-                      const apiKey=supabase.supabaseKey||supabase.rest?.headers?.apikey||'';
-                      const res=await fetch(SUPABASE_URL+'/functions/v1/process-payment',{
-                        method:'POST',
-                        headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session?.access_token||''),'apikey':apiKey},
-                        body:JSON.stringify({action:'initiate',booking_id:bkData.id,client_id:flow.clientId,branch_id:flow.branch.id,amount,payer_phone:payerPhone,payment_type:'full_payment'})
-                      });
-                      const result=await res.json();
-                      if(!res.ok||result.error){
-                        await supabase.from('bookings').delete().eq('id',bkData.id);
-                        throw new Error(result.error||result.details||'Payment initiation failed');
-                      }
-                      setPaymentId(result.payment_id);
-                      setPaymentStatus('initiated');
-
-                      let attempts=0;const maxAttempts=40;
-                      const poll=async()=>{
-                        attempts++;
-                        try{
-                          const vRes=await fetch(SUPABASE_URL+'/functions/v1/process-payment',{
-                            method:'POST',
-                            headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session?.access_token||''),'apikey':apiKey},
-                            body:JSON.stringify({action:'verify',payment_id:result.payment_id})
-                          });
-                          const vData=await vRes.json();
-                          if(vData.status==='successful'){
-                            setPaymentStatus('successful');
-                            if(fetchAll) fetchAll();
-                            return;
-                          }
-                          if(vData.status==='failed'){
-                            setPaymentStatus('failed');
-                            setPaymentError(vData.message||'Payment was declined');
-                            return;
-                          }
-                        }catch(e){console.error('Poll error:',e);}
-                        if(attempts<maxAttempts){
-                          setPaymentStatus('polling');
-                          setTimeout(poll,5000);
-                        }else{
-                          setPaymentStatus('failed');
-                          setPaymentError('Payment timed out. If money was deducted, contact support.');
-                        }
-                      };
-                      setTimeout(poll,8000);
-                    } catch(e) {
-                      setPaymentError(e.message||'Something went wrong');
-                      setPaymentStatus(null);
-                    }
-                    setPaymentLoading(false);
-                  }} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
-                    {paymentLoading?'Processing...':'Pay Now 💳'}
-                  </Btn>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1222,7 +1090,7 @@ export default function GlowBookClient() {
     home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}}/>,
     explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}}/>,
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id||!s.branch_id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp}}/>,
-    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp,fetchAll:()=>fetchAll(authUser),showToastFn}}/>,
+    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp}}/>,
     profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp}}/>,
   };
