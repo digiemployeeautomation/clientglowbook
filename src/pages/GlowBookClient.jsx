@@ -466,7 +466,7 @@ function AuthScreen({onAuth}) {
         ):(
           <>
             <h2 style={{fontFamily:'Fraunces,serif',fontSize:24,fontWeight:700,marginBottom:4}}>{mode==='login'?'Welcome back':'Create account'}</h2>
-            <p style={{color:MUTED,fontSize:14,marginBottom:24}}>{mode==='login'?'Sign in to manage bookings':'Join GlowBook'}</p>
+            <p style={{color:MUTED,fontSize:14,marginBottom:24}}>{mode==='login'?'Your next glow-up is waiting':'Join GlowBook'}</p>
             {error&&<div style={{background:'#fce4ec',color:'#c62828',padding:'12px 16px',borderRadius:12,fontSize:13,fontWeight:500,marginBottom:16}}>{error}</div>}
             {mode==='signup'&&<><input value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" style={iStyle}/><input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone (optional)" style={iStyle}/></>}
             <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email" style={iStyle}/>
