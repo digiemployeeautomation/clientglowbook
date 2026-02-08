@@ -21,12 +21,73 @@ const STATUS_MAP = {
   no_show: { bg: '#fce4ec', fg: '#880e4f', label: 'No Show' },
 };
 
-const CATEGORIES_ICONS = { Braids:'✦', Hair:'✂', Nails:'💅', Skincare:'✨', Spa:'🧖', Makeup:'💄' };
+const CATEGORIES_ICONS = { Braids:'braids', Hair:'hair', Nails:'nails', Skincare:'skincare', Spa:'spa', Makeup:'makeup' };
+const CatIcon = ({cat,size=18}) => { const n=CATEGORIES_ICONS[cat]; return n ? <Icon name={n} size={size} color={ACCENT}/> : <Icon name="sparkle" size={size} color={ACCENT}/> };
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const fmtDate = d => { const dt = new Date(d + 'T00:00:00'); return `${DAYS[dt.getDay()]}, ${dt.getDate()} ${MONTHS[dt.getMonth()]}`; };
 const fmtTime = t => { const [h,m] = t.split(':'); const hr = +h; return `${hr > 12 ? hr-12 : hr || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; };
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// ── Fuzzy Search ──
+// Handles misspellings by combining: trigram similarity, Levenshtein distance, and contains-check
+function fuzzyMatch(query, text) {
+  if (!query || !text) return !query;
+  const q = query.toLowerCase().trim(), t = text.toLowerCase();
+  if (t.includes(q)) return true; // exact substring
+  // split into words — match if ANY word fuzzy-matches any word in text
+  const qWords = q.split(/\s+/), tWords = t.split(/\s+/);
+  return qWords.every(qw => tWords.some(tw => {
+    if (tw.includes(qw) || qw.includes(tw)) return true;
+    // Levenshtein with threshold based on word length
+    const maxDist = qw.length <= 3 ? 1 : qw.length <= 6 ? 2 : 3;
+    let prev = Array.from({length:tw.length+1},(_,i)=>i);
+    for (let i=1;i<=qw.length;i++){
+      const curr=[i];
+      for(let j=1;j<=tw.length;j++) curr[j]=Math.min(prev[j]+1,curr[j-1]+1,prev[j-1]+(qw[i-1]!==tw[j-1]?1:0));
+      prev=curr;
+    }
+    if(prev[tw.length]<=maxDist) return true;
+    // starts-with prefix (first 2+ chars matching)
+    const minPre = Math.min(2, qw.length);
+    if(qw.length>=2 && tw.startsWith(qw.slice(0,minPre))) return true;
+    return false;
+  }));
+}
+
+// ── Filter & Sort helpers ──
+function filterAndSort({items, type, query, category, minRating, priceMin, priceMax, location, sortBy, branches, reviews, bookings, branchAvgRating, services}) {
+  let list = [...items];
+  if (type === 'branches') {
+    // Fuzzy text search on name + location
+    if (query) list = list.filter(b => fuzzyMatch(query, b.name) || fuzzyMatch(query, b.location));
+    // Category: keep branches that have at least one service in that category
+    if (category && category !== 'All') list = list.filter(b => services.some(s => (s.branch_id === b.id || !s.branch_id) && s.category === category));
+    // Min rating
+    if (minRating > 0) list = list.filter(b => { const avg = parseFloat(branchAvgRating(b.id)); return !isNaN(avg) && avg >= minRating; });
+    // Price range: keep branches that have at least one service in range
+    if (priceMin > 0 || priceMax < 9999) list = list.filter(b => services.some(s => (s.branch_id === b.id || !s.branch_id) && s.price >= priceMin && s.price <= priceMax));
+    // Location area
+    if (location && location !== 'All') list = list.filter(b => fuzzyMatch(location, b.location));
+    // Sort
+    if (sortBy === 'rating') list.sort((a,b) => parseFloat(branchAvgRating(b.id)||0) - parseFloat(branchAvgRating(a.id)||0));
+    else if (sortBy === 'price_low') list.sort((a,b) => { const pa = Math.min(...services.filter(s=>s.branch_id===a.id||!s.branch_id).map(s=>s.price||999)); const pb = Math.min(...services.filter(s=>s.branch_id===b.id||!s.branch_id).map(s=>s.price||999)); return pa-pb; });
+    else if (sortBy === 'price_high') list.sort((a,b) => { const pa = Math.max(...services.filter(s=>s.branch_id===a.id||!s.branch_id).map(s=>s.price||0)); const pb = Math.max(...services.filter(s=>s.branch_id===b.id||!s.branch_id).map(s=>s.price||0)); return pb-pa; });
+    else if (sortBy === 'popular') list.sort((a,b) => (bookings||[]).filter(bk=>bk.branch_id===b.id).length - (bookings||[]).filter(bk=>bk.branch_id===a.id).length);
+    else if (sortBy === 'newest') list.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  } else {
+    // Services
+    if (query) list = list.filter(s => fuzzyMatch(query, s.name) || fuzzyMatch(query, s.category) || fuzzyMatch(query, s.description));
+    if (category && category !== 'All') list = list.filter(s => s.category === category);
+    if (priceMin > 0) list = list.filter(s => s.price >= priceMin);
+    if (priceMax < 9999) list = list.filter(s => s.price <= priceMax);
+    if (sortBy === 'price_low') list.sort((a,b) => a.price - b.price);
+    else if (sortBy === 'price_high') list.sort((a,b) => b.price - a.price);
+    else if (sortBy === 'popular') list.sort((a,b) => (bookings||[]).filter(bk=>bk.service_id===b.id).length - (bookings||[]).filter(bk=>bk.service_id===a.id).length);
+    else if (sortBy === 'newest') list.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+  return list;
+}
 
 function useBreakpoint() {
   const [bp, setBp] = useState('mobile');
@@ -70,6 +131,22 @@ const css = `
   .gb-profile-layout{display:block}
   @media(min-width:768px){.gb-profile-layout{display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start}}
   .touch-target{min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center}
+  .gb-filter-panel{background:${CARD};border:1px solid ${BORDER};border-radius:16px;padding:16px;margin-bottom:16px;animation:fadeUp .25s ease both}
+  .gb-filter-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .gb-filter-row:last-child{margin-bottom:0}
+  .gb-filter-label{font-size:12px;font-weight:600;color:${MUTED};min-width:60px;flex-shrink:0}
+  .gb-filter-input{border:1px solid ${BORDER};border-radius:10px;padding:8px 12px;font-size:13px;background:${BG};color:${DARK};min-height:36px;outline:none}
+  .gb-filter-input:focus{border-color:${ACCENT};box-shadow:0 0 0 3px ${ACCENT}18}
+  .gb-filter-select{border:1px solid ${BORDER};border-radius:10px;padding:8px 12px;font-size:13px;background:${BG};color:${DARK};min-height:36px;outline:none;cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a7e7a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+  .gb-star-filter{display:flex;gap:2px;cursor:pointer}
+  .gb-star-filter span{font-size:20px;transition:transform .15s}
+  .gb-star-filter span:hover{transform:scale(1.2)}
+  .gb-sort-btn{padding:7px 14px;border-radius:50px;border:1px solid ${BORDER};background:${CARD};color:${DARK};font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;min-height:34px;transition:all .15s}
+  .gb-sort-btn.active{background:${ACCENT};color:#fff;border-color:${ACCENT}}
+  .gb-filter-toggle{display:flex;align-items:center;gap:6px;padding:8px 16px;border-radius:50px;border:1px solid ${BORDER};background:${CARD};color:${DARK};font-size:13px;font-weight:600;cursor:pointer;min-height:40px;transition:all .15s}
+  .gb-filter-toggle.has-filters{border-color:${ACCENT};color:${ACCENT};background:${ACCENT}08}
+  .gb-filter-badge{background:${ACCENT};color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px}
+  .gb-clear-btn{background:none;border:none;color:${ACCENT};font-size:12px;font-weight:600;cursor:pointer;padding:4px 8px;min-height:30px}
 `;
 
 async function uploadImage(bucket, folder, file) {
@@ -102,6 +179,18 @@ const Icon = ({ name, size = 20, color = DARK, ...p }) => {
     menu:<><path d="M3 12h18M3 6h18M3 18h18"/></>,
     bell:<><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></>,
     logout:<><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></>,
+    braids:<><path d="M12 2c0 4-3 6-3 10s3 6 3 10"/><path d="M12 2c0 4 3 6 3 10s-3 6-3 10"/><path d="M8 6h8M8 12h8M8 18h8"/></>,
+    hair:<><path d="M20 7c0-2.8-3.6-5-8-5S4 4.2 4 7c0 1.5.8 2.8 2 3.8V21h2v-4h8v4h2V10.8c1.2-1 2-2.3 2-3.8z"/><path d="M8 13v-2M12 13v-3M16 13v-2"/></>,
+    nails:<><path d="M8 21V11a4 4 0 018 0v10"/><path d="M8 14h8"/><path d="M10 7v4M12 6v5M14 7v4"/></>,
+    skincare:<><path d="M12 22c4-2 7-6 7-11V5l-7-3-7 3v6c0 5 3 9 7 11z"/><circle cx="12" cy="11" r="2"/><path d="M12 9v-2"/></>,
+    spa:<><path d="M12 22c-4.97 0-9-2.24-9-5v-1c0-2.76 4.03-5 9-5s9 2.24 9 5v1c0 2.76-4.03 5-9 5z"/><path d="M12 11C9 11 7 8 7 5a5 5 0 0110 0c0 3-2 6-5 6z"/></>,
+    makeup:<><path d="M9.5 2l-1 7.5c0 2 1.5 3.5 3.5 3.5s3.5-1.5 3.5-3.5L14.5 2"/><path d="M12 13v9"/><path d="M8 22h8"/><circle cx="12" cy="5" r="1"/></>,
+    dollar:<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></>,
+    share:<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></>,
+    copy:<><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></>,
+    points:<><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7L12 16.4 5.7 21l2.3-7L2 9.4h7.6z" fill={color} stroke="none"/></>,
+    filter:<><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></>,
+    sort:<><path d="M3 6h18M6 12h12M9 18h6"/></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>{paths[name]}</svg>;
 };
@@ -135,11 +224,82 @@ const Toast = ({message,type='success'}) => <div className="fade-up" style={{pos
 
 const EmptyState = ({icon,title,sub}) => <div style={{textAlign:'center',padding:'48px 20px'}}><div style={{fontSize:40,marginBottom:12}}>{icon}</div><div style={{fontSize:16,fontWeight:600,marginBottom:4}}>{title}</div><div style={{fontSize:14,color:MUTED}}>{sub}</div></div>;
 
+function FilterPanel({filters,setFilters,locations,showPanel,setShowPanel,resultCount}) {
+  const {minRating=0,priceMin=0,priceMax=9999,location='All',sortBy='rating'} = filters;
+  const activeCount = (minRating>0?1:0)+(priceMin>0?1:0)+(priceMax<9999?1:0)+(location!=='All'?1:0);
+  const uf = (k,v) => setFilters(f=>({...f,[k]:v}));
+  const clearAll = () => setFilters(f=>({...f,minRating:0,priceMin:0,priceMax:9999,location:'All',sortBy:'rating'}));
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+        <button className={`gb-filter-toggle ${activeCount>0?'has-filters':''}`} onClick={()=>setShowPanel(!showPanel)}>
+          <Icon name="filter" size={16} color={activeCount>0?ACCENT:MUTED}/>
+          Filters
+          {activeCount>0&&<span className="gb-filter-badge">{activeCount}</span>}
+        </button>
+        {/* Sort pills always visible */}
+        <div style={{display:'flex',gap:6,overflowX:'auto',flex:1}}>
+          {[{id:'rating',label:'Top Rated'},{id:'popular',label:'Most Popular'},{id:'price_low',label:'Price ↑'},{id:'price_high',label:'Price ↓'},{id:'newest',label:'Newest'}].map(s=>
+            <button key={s.id} className={`gb-sort-btn ${sortBy===s.id?'active':''}`} onClick={()=>uf('sortBy',s.id)}>{s.label}</button>
+          )}
+        </div>
+      </div>
+      {showPanel&&<div className="gb-filter-panel" style={{marginTop:12}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <span style={{fontSize:14,fontWeight:700,color:DARK}}>Filters</span>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {activeCount>0&&<button className="gb-clear-btn" onClick={clearAll}>Clear all</button>}
+            <span style={{fontSize:12,color:MUTED}}>{resultCount} result{resultCount!==1?'s':''}</span>
+          </div>
+        </div>
+
+        {/* Rating filter */}
+        <div className="gb-filter-row">
+          <span className="gb-filter-label">Rating</span>
+          <div className="gb-star-filter">
+            {[1,2,3,4,5].map(i=>(
+              <span key={i} onClick={()=>uf('minRating',minRating===i?0:i)} style={{color:i<=minRating?GOLD:'#ddd',cursor:'pointer',fontSize:22,lineHeight:1}}>{i<=minRating?'★':'☆'}</span>
+            ))}
+            {minRating>0&&<span style={{fontSize:12,color:MUTED,marginLeft:6}}>{minRating}+ stars</span>}
+          </div>
+        </div>
+
+        {/* Price range */}
+        <div className="gb-filter-row">
+          <span className="gb-filter-label">Price</span>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <span style={{fontSize:13,color:MUTED}}>K</span>
+            <input type="number" className="gb-filter-input" placeholder="Min" value={priceMin||''} onChange={e=>uf('priceMin',parseInt(e.target.value)||0)} style={{width:80}}/>
+            <span style={{color:MUTED}}>—</span>
+            <input type="number" className="gb-filter-input" placeholder="Max" value={priceMax>=9999?'':priceMax} onChange={e=>uf('priceMax',parseInt(e.target.value)||9999)} style={{width:80}}/>
+          </div>
+          {/* Quick price buttons */}
+          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+            {[{l:'Under K50',min:0,max:50},{l:'K50–150',min:50,max:150},{l:'K150–300',min:150,max:300},{l:'K300+',min:300,max:9999}].map(p=>
+              <button key={p.l} className={`gb-sort-btn ${priceMin===p.min&&priceMax===p.max?'active':''}`} onClick={()=>{uf('priceMin',p.min);uf('priceMax',p.max);}}>{p.l}</button>
+            )}
+          </div>
+        </div>
+
+        {/* Location filter */}
+        <div className="gb-filter-row">
+          <span className="gb-filter-label">Area</span>
+          <select className="gb-filter-select" value={location} onChange={e=>uf('location',e.target.value)}>
+            <option value="All">All areas</option>
+            {locations.map(l=><option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 const Toggle = ({value,onChange}) => <div onClick={onChange} style={{width:44,height:26,borderRadius:13,background:value?ACCENT:BORDER,cursor:'pointer',position:'relative',transition:'all .2s',flexShrink:0}}><div style={{width:22,height:22,borderRadius:11,background:'#fff',position:'absolute',top:2,left:value?20:2,transition:'all .2s',boxShadow:'0 1px 3px rgba(0,0,0,.15)'}}/></div>;
 
 const NAV_ITEMS = [{id:'home',icon:'home',label:'Home'},{id:'explore',icon:'search',label:'Explore'},{id:'bookings',icon:'calendar',label:'Bookings'},{id:'profile',icon:'user',label:'Profile'}];
 
-function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogout,isDemo,bp}) {
+function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogout,bp}) {
   const [drawerOpen,setDrawerOpen] = useState(false);
   const navTo = id => {setPage(id);setDrawerOpen(false)};
 
@@ -160,7 +320,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
           <div style={{width:36,height:36,borderRadius:18,background:`linear-gradient(135deg,${ACCENT},${ROSE})`,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,fontSize:14,flexShrink:0}}>{client?.name?.[0]||'G'}</div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{client?.name||'Guest'}</div>
-            <div style={{fontSize:11,color:MUTED}}>{isDemo?'Demo':client?.email||''}</div>
+            <div style={{fontSize:11,color:MUTED}}>{client?.email||''}</div>
           </div>
           <button onClick={onLogout} className="touch-target" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="logout" size={18} color={MUTED}/></button>
         </div>
@@ -191,7 +351,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
           </button>)}
         </nav>
         <div style={{padding:16,borderTop:`1px solid ${BORDER}`}}>
-          <Btn full variant={isDemo?'primary':'secondary'} onClick={()=>{setDrawerOpen(false);onLogout()}} style={{borderRadius:12,...(isDemo?{}:{color:'#c62828'})}}>{isDemo?'Sign Up':'Sign Out'}</Btn>
+          <Btn full variant="secondary" onClick={()=>{setDrawerOpen(false);onLogout()}} style={{borderRadius:12,color:'#c62828'}}>Sign Out</Btn>
         </div>
       </div>
     </div>
@@ -221,7 +381,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
   );
 }
 
-function AuthScreen({onAuth,onDemo}) {
+function AuthScreen({onAuth}) {
   const [mode,setMode]=useState('login');
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
@@ -316,8 +476,6 @@ function AuthScreen({onAuth,onDemo}) {
             <Btn full variant="primary" disabled={submitting} onClick={mode==='login'?handleLogin:handleSignup} style={{marginBottom:12}}>{submitting?'Please wait...':mode==='login'?'Sign In':'Create Account'}</Btn>
             {mode==='login'&&<button onClick={()=>{setMode('forgot');setError('')}} style={{background:'none',border:'none',color:MUTED,fontSize:13,cursor:'pointer',padding:4,marginBottom:8,textAlign:'center'}}>Forgot password?</button>}
             <button onClick={()=>{setMode(mode==='login'?'signup':'login');setError('')}} style={{background:'none',border:'none',color:ACCENT,fontSize:14,fontWeight:600,cursor:'pointer',padding:8,marginBottom:16,textAlign:'center'}}>{mode==='login'?"Don't have an account? Sign up":'Already have an account? Sign in'}</button>
-            <div style={{display:'flex',alignItems:'center',gap:12,margin:'8px 0 16px'}}><div style={{flex:1,height:1,background:BORDER}}/><span style={{fontSize:12,color:MUTED,fontWeight:500}}>OR</span><div style={{flex:1,height:1,background:BORDER}}/></div>
-            <Btn full variant="secondary" onClick={onDemo}>Continue as Guest</Btn>
           </>
         )}
       </div>
@@ -325,10 +483,12 @@ function AuthScreen({onAuth,onDemo}) {
   );
 }
 
-function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}) {
-  const topBranches=[...branches].sort((a,b)=>{const ra=branchReviews(a.id),rb=branchReviews(b.id);return(rb.length?rb.reduce((s,r)=>s+r.rating_overall,0)/rb.length:0)-(ra.length?ra.reduce((s,r)=>s+r.rating_overall,0)/ra.length:0)});
+function HomePage({branches,services,reviews,staff,bookings,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,filters,setFilters,showFilterPanel,setShowFilterPanel,locations}) {
+  const filteredBranches = filterAndSort({items:branches,type:'branches',query:searchQuery,category:selectedCategory,minRating:filters.minRating,priceMin:filters.priceMin,priceMax:filters.priceMax,location:filters.location,sortBy:filters.sortBy,branches,reviews,bookings,branchAvgRating,services});
+  const filteredServices = filterAndSort({items:services,type:'services',query:searchQuery,category:selectedCategory,minRating:0,priceMin:filters.priceMin,priceMax:filters.priceMax,location:'All',sortBy:filters.sortBy,branches,reviews,bookings,branchAvgRating,services});
   const recentReviews=reviews.slice(0,4);
   const pad=bp==='desktop'?'32px':'20px';
+  const hasActiveFilters = searchQuery || filters.minRating>0 || filters.priceMin>0 || filters.priceMax<9999 || (filters.location&&filters.location!=='All');
 
   return (
     <div className="fade-up">
@@ -339,6 +499,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
           <div style={{background:'rgba(255,255,255,.95)',borderRadius:14,display:'flex',alignItems:'center',padding:'0 14px',boxShadow:'0 4px 20px rgba(0,0,0,.08)'}}>
             <Icon name="search" size={18} color={MUTED}/>
             <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search salons, services..." onFocus={()=>navigate('explore')} style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
+            {searchQuery&&<button onClick={()=>setSearchQuery('')} style={{background:'none',border:'none',cursor:'pointer',padding:4}}><Icon name="close" size={16} color={MUTED}/></button>}
           </div>
         </div>
       </div>
@@ -351,48 +512,57 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
           </div>
         )})}</div>}
         <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:16,marginBottom:8}}>
-          {categories.map(c=><button key={c} onClick={()=>{setSelectedCategory(c);navigate('explore')}} style={{flexShrink:0,padding:'10px 18px',borderRadius:50,border:`1.5px solid ${c===selectedCategory?ACCENT:BORDER}`,background:c===selectedCategory?`${ACCENT}12`:CARD,color:c===selectedCategory?ACCENT:DARK,fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6,minHeight:44}}>{c!=='All'&&<span>{CATEGORIES_ICONS[c]||'•'}</span>}{c}</button>)}
+          {categories.map(c=><button key={c} onClick={()=>{setSelectedCategory(c);if(c!=='All')navigate('explore');}} style={{flexShrink:0,padding:'10px 18px',borderRadius:50,border:`1.5px solid ${c===selectedCategory?ACCENT:BORDER}`,background:c===selectedCategory?`${ACCENT}12`:CARD,color:c===selectedCategory?ACCENT:DARK,fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6,minHeight:44}}>{c!=='All'&&<CatIcon cat={c}/>}{c}</button>)}
         </div>
+
+        {/* Filter bar on home too */}
+        <div style={{marginBottom:20}}>
+          <FilterPanel filters={filters} setFilters={setFilters} locations={locations} showPanel={showFilterPanel} setShowPanel={setShowFilterPanel} resultCount={filteredBranches.length}/>
+        </div>
+
         <div style={{marginBottom:28}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-            <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>Top Salons</h2>
+            <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>{hasActiveFilters?`Results (${filteredBranches.length})`:'Top Salons'}</h2>
             <button onClick={()=>navigate('explore')} style={{background:'none',border:'none',color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44,display:'flex',alignItems:'center'}}>See all →</button>
           </div>
-          <div className="gb-salon-list">
-            {topBranches.slice(0,bp==='desktop'?6:4).map(b=>{
+          {filteredBranches.length>0?<div className="gb-salon-list">
+            {filteredBranches.slice(0,bp==='desktop'?6:4).map(b=>{
               const colors=['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
               const bgC=colors[b.name?.length%colors.length]||'#c47d5a';
               const avg=branchAvgRating(b.id);
               return(
                 <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:18,overflow:'hidden',border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-3px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
-                  <div style={{height:100,background:`linear-gradient(135deg,${bgC},${bgC}dd)`,position:'relative',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <span style={{fontSize:36,opacity:.25}}>✂</span>
+                  <div style={{height:100,background:b.images?.[0]?`url(${b.images[0]}) center/cover`:`linear-gradient(135deg,${bgC},${bgC}dd)`,position:'relative',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {!b.images?.[0]&&<span style={{fontSize:36,opacity:.25}}>✂</span>}
                     <button onClick={e=>{e.stopPropagation();toggleFav(b.id)}} style={{position:'absolute',top:10,right:10,background:'rgba(255,255,255,.8)',border:'none',borderRadius:50,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}><Icon name="heart" size={16} color={favorites.includes(b.id)?ROSE:'#999'}/></button>
                   </div>
                   <div style={{padding:14}}>
                     <h3 style={{fontSize:15,fontWeight:700,marginBottom:4}}>{b.name}</h3>
                     <div style={{display:'flex',alignItems:'center',gap:4,fontSize:12,color:MUTED,marginBottom:6}}><Icon name="map" size={12} color={MUTED}/>{b.location||'Lusaka'}</div>
-                    <div style={{display:'flex',alignItems:'center',gap:4}}><Stars rating={Math.round(+avg)} size={12}/><span style={{fontSize:12,fontWeight:600}}>{avg}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <div style={{display:'flex',alignItems:'center',gap:4}}><Stars rating={Math.round(+avg)} size={12}/><span style={{fontSize:12,fontWeight:600}}>{avg}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
+                      {services.filter(s=>s.branch_id===b.id||!s.branch_id).length>0&&<span style={{fontSize:11,color:MUTED}}>· from K{Math.min(...services.filter(s=>s.branch_id===b.id||!s.branch_id).map(s=>s.price))}</span>}
+                    </div>
                   </div>
                 </div>
               );
             })}
-          </div>
+          </div>:<EmptyState icon="🔍" title="No salons match" sub="Try adjusting your filters"/>}
         </div>
         <div style={{marginBottom:28}}>
-          <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Popular Services</h2>
-          <div className="gb-grid-pop">
-            {services.slice(0,bp==='desktop'?8:6).map(s=>(
+          <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>{hasActiveFilters?`Services (${filteredServices.length})`:'Popular Services'}</h2>
+          {filteredServices.length>0?<div className="gb-grid-pop">
+            {filteredServices.slice(0,bp==='desktop'?8:6).map(s=>(
               <div key={s.id} onClick={()=>navigate('explore',{service:s})} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-2px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
-                <div style={{fontSize:24,marginBottom:8}}>{CATEGORIES_ICONS[s.category]||'✨'}</div>
+                <div style={{marginBottom:8}}><CatIcon cat={s.category} size={24}/></div>
                 <div style={{fontSize:14,fontWeight:600,marginBottom:4,lineHeight:1.3}}>{s.name}</div>
                 <div style={{fontSize:13,color:MUTED}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
                 <div style={{fontSize:15,fontWeight:700,color:ACCENT,marginTop:6}}>K{s.price}{s.price_max&&s.price_max!==s.price?`–${s.price_max}`:''}</div>
               </div>
             ))}
-          </div>
+          </div>:<EmptyState icon="💇" title="No services match" sub="Try adjusting filters"/>}
         </div>
-        {recentReviews.length>0&&(
+        {!hasActiveFilters&&recentReviews.length>0&&(
           <div style={{marginBottom:28}}>
             <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Recent Reviews</h2>
             <div style={{display:'grid',gap:12,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
@@ -410,12 +580,16 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
   );
 }
 
-function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}) {
-  const q=searchQuery.toLowerCase();
-  const filteredBranches=branches.filter(b=>(!q||b.name?.toLowerCase().includes(q)||b.location?.toLowerCase().includes(q))&&(selectedCategory==='All'||services.some(s=>s.category===selectedCategory)));
-  const filteredServices=services.filter(s=>(!q||s.name?.toLowerCase().includes(q)||s.category?.toLowerCase().includes(q))&&(selectedCategory==='All'||s.category===selectedCategory));
+function ExplorePage({branches,services,reviews,bookings,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,filters,setFilters,showFilterPanel,setShowFilterPanel,locations}) {
   const [viewMode,setViewMode]=useState('salons');
   const pad=bp==='desktop'?'32px':'20px';
+
+  const filteredBranches = filterAndSort({items:branches,type:'branches',query:searchQuery,category:selectedCategory,minRating:filters.minRating,priceMin:filters.priceMin,priceMax:filters.priceMax,location:filters.location,sortBy:filters.sortBy,branches,reviews,bookings,branchAvgRating,services});
+  const filteredServices = filterAndSort({items:services,type:'services',query:searchQuery,category:selectedCategory,minRating:0,priceMin:filters.priceMin,priceMax:filters.priceMax,location:'All',sortBy:filters.sortBy,branches,reviews,bookings,branchAvgRating,services});
+  const resultCount = viewMode==='salons'?filteredBranches.length:filteredServices.length;
+
+  // Fuzzy search suggestion when no results
+  const hasSuggestion = searchQuery && resultCount===0;
 
   return (
     <div className="fade-up">
@@ -428,37 +602,51 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
           </div>
         </div>
         <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:4}}>
-          {categories.map(c=><button key={c} onClick={()=>setSelectedCategory(c)} style={{flexShrink:0,padding:'8px 16px',borderRadius:50,border:'none',background:c===selectedCategory?ACCENT:`${ACCENT}10`,color:c===selectedCategory?'#fff':DARK,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:36}}>{c!=='All'&&<span style={{marginRight:4}}>{CATEGORIES_ICONS[c]||'•'}</span>}{c}</button>)}
+          {categories.map(c=><button key={c} onClick={()=>setSelectedCategory(c)} style={{flexShrink:0,padding:'8px 16px',borderRadius:50,border:'none',background:c===selectedCategory?ACCENT:`${ACCENT}10`,color:c===selectedCategory?'#fff':DARK,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:36}}>{c!=='All'&&<span style={{marginRight:4}}><CatIcon cat={c}/></span>}{c}</button>)}
         </div>
       </div>
-      <div style={{padding:`14px ${pad}`,display:'flex',gap:8,maxWidth:300}}>
-        {['salons','services'].map(v=><button key={v} onClick={()=>setViewMode(v)} style={{flex:1,padding:'10px',borderRadius:10,border:'none',fontWeight:600,fontSize:13,minHeight:40,background:viewMode===v?DARK:'#f0ebe7',color:viewMode===v?'#fff':DARK,cursor:'pointer',textTransform:'capitalize'}}>{v}</button>)}
+      <div style={{padding:`14px ${pad} 0`}}>
+        <FilterPanel filters={filters} setFilters={setFilters} locations={locations} showPanel={showFilterPanel} setShowPanel={setShowFilterPanel} resultCount={resultCount}/>
+      </div>
+      <div style={{padding:`10px ${pad}`,display:'flex',gap:8,maxWidth:300}}>
+        {['salons','services'].map(v=><button key={v} onClick={()=>setViewMode(v)} style={{flex:1,padding:'10px',borderRadius:10,border:'none',fontWeight:600,fontSize:13,minHeight:40,background:viewMode===v?DARK:'#f0ebe7',color:viewMode===v?'#fff':DARK,cursor:'pointer',textTransform:'capitalize'}}>{v} ({v==='salons'?filteredBranches.length:filteredServices.length})</button>)}
       </div>
       <div style={{padding:`0 ${pad} 32px`}}>
-        {viewMode==='salons'?(filteredBranches.length?
+        {hasSuggestion && <div style={{textAlign:'center',padding:'32px 16px'}}>
+          <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+          <div style={{fontSize:15,fontWeight:600,color:DARK,marginBottom:4}}>No results for "{searchQuery}"</div>
+          <div style={{fontSize:13,color:MUTED,marginBottom:12}}>Check for typos or try a different spelling</div>
+          {branches.length>0&&<div style={{fontSize:12,color:MUTED}}>Try: {branches.slice(0,3).map(b=>b.name).join(', ')}</div>}
+        </div>}
+        {!hasSuggestion && (viewMode==='salons'?(filteredBranches.length?
           <div className="gb-salon-list">
             {filteredBranches.map(b=>(
-              <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:18,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:14}}>
-                <div style={{width:64,height:64,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}40,${ROSE}40)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:24}}>✂</div>
+              <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:18,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:14,transition:'transform .15s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-2px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
+                <div style={{width:64,height:64,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}40,${ROSE}40)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:24,overflow:'hidden'}}>
+                  {b.images?.[0]?<img src={b.images[0]} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>:'✂'}
+                </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'start'}}><h3 style={{fontSize:15,fontWeight:700}}>{b.name}</h3><button onClick={e=>{e.stopPropagation();toggleFav(b.id)}} className="touch-target" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="heart" size={18} color={favorites.includes(b.id)?ROSE:'#ddd'}/></button></div>
                   <div style={{display:'flex',alignItems:'center',gap:4,fontSize:12,color:MUTED,margin:'3px 0'}}><Icon name="map" size={12} color={MUTED}/>{b.location||'Lusaka'}</div>
-                  <div style={{display:'flex',alignItems:'center',gap:6}}><Stars rating={Math.round(+branchAvgRating(b.id))} size={12}/><span style={{fontSize:12,fontWeight:600}}>{branchAvgRating(b.id)}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4}}><Stars rating={Math.round(+branchAvgRating(b.id))} size={12}/><span style={{fontSize:12,fontWeight:600}}>{branchAvgRating(b.id)}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
+                    {services.filter(s=>s.branch_id===b.id||!s.branch_id).length>0&&<span style={{fontSize:11,color:MUTED}}>· from K{Math.min(...services.filter(s=>s.branch_id===b.id||!s.branch_id).map(s=>s.price))}</span>}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-        :<EmptyState icon="🔍" title="No salons found" sub="Try a different search"/>)
+        :<EmptyState icon="🔍" title="No salons found" sub="Try adjusting your filters"/>)
         :(filteredServices.length?
           <div className="gb-grid-services">
             {filteredServices.map(s=>(
               <div key={s.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}><span style={{fontSize:16}}>{CATEGORIES_ICONS[s.category]||'✨'}</span><span style={{fontSize:15,fontWeight:600}}>{s.name}</span></div><div style={{fontSize:12,color:MUTED}}>{s.category} • {s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
+                <div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}><CatIcon cat={s.category} size={16}/><span style={{fontSize:15,fontWeight:600}}>{s.name}</span></div><div style={{fontSize:12,color:MUTED}}>{s.category} • {s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
                 <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}><div style={{fontSize:16,fontWeight:700,color:ACCENT}}>K{s.price}</div>{s.price_max!==s.price&&<div style={{fontSize:11,color:MUTED}}>–K{s.price_max}</div>}</div>
               </div>
             ))}
           </div>
-        :<EmptyState icon="💇" title="No services found" sub="Try a different category"/>)}
+        :<EmptyState icon="💇" title="No services found" sub="Try adjusting your filters"/>))}
       </div>
     </div>
   );
@@ -496,7 +684,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
       <div style={{padding:`0 ${pad} 100px`}}>
         {tab==='services'&&Object.entries(grouped).map(([cat,svcs])=>(
           <div key={cat} style={{marginBottom:20}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}><span style={{fontSize:16}}>{CATEGORIES_ICONS[cat]||'✨'}</span><h3 style={{fontSize:16,fontWeight:700}}>{cat}</h3></div>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}><CatIcon cat={cat} size={16}/><h3 style={{fontSize:16,fontWeight:700}}>{cat}</h3></div>
             <div className="gb-grid-services">{svcs.map(s=>(
               <div key={s.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min{s.deposit?` • K${s.deposit} dep`:''}</div></div>
@@ -536,7 +724,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
         :<EmptyState icon="⭐" title="No reviews yet" sub="Be the first!"/>)}
       </div>
       <div style={{position:'fixed',bottom:0,left:bp==='desktop'?SIDEBAR_W:0,right:0,padding:'12px 20px',background:'rgba(250,247,245,.92)',backdropFilter:'blur(16px)',borderTop:`1px solid ${BORDER}`,zIndex:90}}>
-        <div style={{maxWidth:480}}><Btn full variant="primary" onClick={()=>navigate('booking',{bookingFlow:{step:0,branch,service:null,staff:null,date:null,time:null,clientPoints:client?.glow_points||0}})} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>Book Appointment ✨</Btn></div>
+        <div style={{maxWidth:480}}><Btn full variant="primary" onClick={()=>navigate('booking',{bookingFlow:{step:0,branch,service:null,staff:null,date:null,time:null}})} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>Book Appointment ✨</Btn></div>
       </div>
     </div>
   );
@@ -547,24 +735,35 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
   const pad=bp==='desktop'?'32px':'20px';
-  const openH=parseInt(flow.branch?.open_time?.slice(0,2))||8;
-  const closeH=parseInt(flow.branch?.close_time?.slice(0,2))||17;
+  const openH=parseInt(flow.branch?.open_time?.slice(0,2))||8;const openM=parseInt(flow.branch?.open_time?.slice(3,5))||0;
+  const closeH=parseInt(flow.branch?.close_time?.slice(0,2))||17;const closeM=parseInt(flow.branch?.close_time?.slice(3,5))||0;
+  const interval=flow.branch?.slot_interval||30;
   const timeSlots=[];
-  for(let h=openH;h<=closeH;h++){timeSlots.push(`${String(h).padStart(2,'0')}:00`);if(h<closeH)timeSlots.push(`${String(h).padStart(2,'0')}:30`)}
+  for(let m=openH*60+openM;m<closeH*60+closeM;m+=interval){const h=Math.floor(m/60),mi=m%60;timeSlots.push(`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`);}
   const [bookedSlots,setBookedSlots]=useState([]);
   const [blockedSlots,setBlockedSlots]=useState([]);
 
   useEffect(()=>{
     if(!flow.date)return;
-    const q=supabase.from('bookings').select('booking_time').eq('booking_date',flow.date).neq('status','cancelled');
-    if(flow.staff?.id)q.eq('staff_id',flow.staff.id);
-    q.then(({data})=>setBookedSlots((data||[]).map(b=>b.booking_time?.slice(0,5))));
     if(flow.staff?.id){
+      // Specific staff: show their booked slots
+      supabase.from('bookings').select('booking_time').eq('booking_date',flow.date).eq('staff_id',flow.staff.id).neq('status','cancelled')
+        .then(({data})=>setBookedSlots((data||[]).map(b=>b.booking_time?.slice(0,5))));
       supabase.from('staff_blocked_times').select('*').eq('staff_id',flow.staff.id).eq('block_date',flow.date).then(({data})=>{
         if(!data?.length){setBlockedSlots([]);return}
         const bl=[];data.forEach(bt=>{if(!bt.start_time)timeSlots.forEach(t=>bl.push(t));else{const s=bt.start_time?.slice(0,5),e=bt.end_time?.slice(0,5);timeSlots.forEach(t=>{if(t>=s&&t<=e)bl.push(t)})}});setBlockedSlots(bl);
       });
-    }else setBlockedSlots([]);
+    }else{
+      // Any Available: slot is full only when ALL staff at this branch are booked
+      const branchStaff=staff.filter(s=>s.branch_id===flow.branch?.id&&s.is_active!==false);
+      const totalStaff=Math.max(branchStaff.length,1);
+      supabase.from('bookings').select('booking_time').eq('booking_date',flow.date).eq('branch_id',flow.branch?.id).neq('status','cancelled')
+        .then(({data})=>{
+          const counts={};(data||[]).forEach(b=>{const t=b.booking_time?.slice(0,5);counts[t]=(counts[t]||0)+1});
+          setBookedSlots(Object.entries(counts).filter(([,c])=>c>=totalStaff).map(([t])=>t));
+        });
+      setBlockedSlots([]);
+    }
   },[flow.date,flow.staff]);
 
   const dates=[];for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);dates.push(d.toISOString().slice(0,10))}
@@ -586,11 +785,11 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
             <h3 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:16}}>Choose a service</h3>
             {Object.entries(grouped).map(([cat,svcs])=>(
               <div key={cat} style={{marginBottom:20}}>
-                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}><span>{CATEGORIES_ICONS[cat]||'✨'}</span><h4 style={{fontSize:14,fontWeight:700,color:MUTED,textTransform:'uppercase',letterSpacing:.5}}>{cat}</h4></div>
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}><CatIcon cat={cat}/><h4 style={{fontSize:14,fontWeight:700,color:MUTED,textTransform:'uppercase',letterSpacing:.5}}>{cat}</h4></div>
                 <div className="gb-grid-services">{svcs.map(s=>(
                   <div key={s.id} onClick={()=>update({service:s,step:1})} style={{background:flow.service?.id===s.id?`${ACCENT}08`:CARD,borderRadius:16,padding:16,border:flow.service?.id===s.id?`2px solid ${ACCENT}`:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',minHeight:60}}>
                     <div style={{display:'flex',gap:12,alignItems:'center',flex:1,minWidth:0}}>
-                      <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}15,${ROSE}15)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>{CATEGORIES_ICONS[s.category]||'✨'}</div>
+                      <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}15,${ROSE}15)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><CatIcon cat={s.category} size={20}/></div>
                       <div><div style={{fontSize:15,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
                     </div>
                     <div style={{fontSize:16,fontWeight:700,color:ACCENT,flexShrink:0}}>K{s.price}</div>
@@ -672,7 +871,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   ))}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:16}}>
                     <span style={{fontSize:14,color:MUTED}}>Total</span>
-                    <span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{Math.max(0,(flow.service?.price_max||flow.service?.price||0)-(flow.usePoints&&flow.pointsToUse?Math.floor(flow.pointsToUse/10):0))}</span>
+                    <span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{flow.service?.price_max||flow.service?.price||0}</span>
                   </div>
                 </div>
               </div>
@@ -682,17 +881,9 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               </div>
             </div>
             <div>
-              {flow.clientPoints>0&&(
-                <div style={{background:`linear-gradient(135deg,${GOLD}08,${ACCENT}08)`,borderRadius:16,border:`1px solid ${GOLD}20`,padding:16,marginBottom:16}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:flow.usePoints?12:0}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:18}}>⭐</span><div><div style={{fontSize:14,fontWeight:600}}>Use GlowPoints</div><div style={{fontSize:12,color:MUTED}}>{flow.clientPoints} pts</div></div></div>
-                    <Toggle value={flow.usePoints} onChange={()=>update({usePoints:!flow.usePoints,pointsToUse:0})}/>
-                  </div>
-                  {flow.usePoints&&(()=>{const max=Math.min(flow.clientPoints,(flow.service?.price_max||flow.service?.price||0)*10);return(
-                    <div><input type="range" min={0} max={max} step={10} value={flow.pointsToUse||0} onChange={e=>update({pointsToUse:parseInt(e.target.value)})} style={{width:'100%',accentColor:GOLD}}/><div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:MUTED,marginTop:4}}><span>0</span><span style={{fontWeight:700,color:GOLD}}>−K{Math.floor((flow.pointsToUse||0)/10)}</span><span>{max}</span></div></div>
-                  )})()}
-                </div>
-              )}
+              <div style={{background:`linear-gradient(135deg,${GOLD}08,${ACCENT}08)`,borderRadius:16,border:`1px solid ${GOLD}20`,padding:16,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:18}}>⭐</span><div><div style={{fontSize:14,fontWeight:600}}>You'll earn {Math.floor((flow.service?.price_max||flow.service?.price||0)/10)} GlowPoints</div><div style={{fontSize:12,color:MUTED}}>Points awarded when your appointment is completed</div></div></div>
+              </div>
               <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:flow.recurring?12:0}}>
                   <div><div style={{fontSize:14,fontWeight:600}}>Recurring</div><div style={{fontSize:12,color:MUTED}}>Auto-book same time</div></div>
@@ -736,7 +927,7 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
     return(
       <div style={{background:CARD,borderRadius:18,overflow:'hidden',border:`1px solid ${BORDER}`}}>
         <div style={{display:'flex',gap:14,padding:16}}>
-          <div style={{width:52,height:52,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}20,${ROSE}20)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><span style={{fontSize:22}}>{CATEGORIES_ICONS[svc?.category]||'✨'}</span></div>
+          <div style={{width:52,height:52,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}20,${ROSE}20)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><CatIcon cat={svc?.category} size={22}/></div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:4,gap:8}}><h4 style={{fontSize:15,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{svc?.name||'Service'}</h4><Badge bg={st.bg} fg={st.fg}>{st.label}</Badge></div>
             <div style={{fontSize:13,color:MUTED,marginBottom:2}}>{br?.name||'Salon'}</div>
@@ -793,7 +984,7 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
   );
 }
 
-function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,isDemo,handleLogout,bp}) {
+function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp}) {
   const totalSpent=clientBookings.filter(b=>b.status==='completed').reduce((s,b)=>s+(b.total_amount||0),0);
   const points=client.glow_points||0;
   const favBranches=branches.filter(b=>favorites.includes(b.id));
@@ -894,7 +1085,7 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
                 ))}
               </div>
             )}
-            {bp!=='desktop'&&<Btn full variant={isDemo?'primary':'secondary'} onClick={handleLogout} style={{borderRadius:14,marginBottom:20,...(isDemo?{}:{color:'#c62828'})}}>{isDemo?'Sign Up':'Sign Out'}</Btn>}
+            {bp!=='desktop'&&<Btn full variant="secondary" onClick={handleLogout} style={{borderRadius:14,marginBottom:20,color:'#c62828'}}>Sign Out</Btn>}
           </div>
         </div>
       </div>
@@ -917,7 +1108,6 @@ export default function GlowBookClient() {
   const bp = useBreakpoint();
   const [authUser,setAuthUser] = useState(null);
   const [authChecked,setAuthChecked] = useState(false);
-  const [isDemo,setIsDemo] = useState(false);
   const [page,setPage] = useState('home');
   const [branches,setBranches] = useState([]);
   const [services,setServices] = useState([]);
@@ -931,6 +1121,8 @@ export default function GlowBookClient() {
   const [bookingFlow,setBookingFlow] = useState(null);
   const [searchQuery,setSearchQuery] = useState('');
   const [selectedCategory,setSelectedCategory] = useState('All');
+  const [filters,setFilters] = useState({minRating:0,priceMin:0,priceMax:9999,location:'All',sortBy:'rating'});
+  const [showFilterPanel,setShowFilterPanel] = useState(false);
   const [client,setClient] = useState({id:null,name:'Guest',phone:'',email:''});
   const [navHistory,setNavHistory] = useState([]);
   const [favorites,setFavorites] = useState([]);
@@ -945,7 +1137,7 @@ export default function GlowBookClient() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setAuthUser(null);setIsDemo(false);setClient({id:null,name:'Guest',phone:'',email:''});setPage('home');
+    setAuthUser(null);setClient({id:null,name:'Guest',phone:'',email:''});setPage('home');
   };
 
   const fetchAll = async (user) => {
@@ -973,7 +1165,7 @@ export default function GlowBookClient() {
     setLoading(false);
   };
 
-  useEffect(() => {if(authChecked&&(authUser||isDemo)) fetchAll(authUser)}, [authChecked,authUser,isDemo]);
+  useEffect(() => {if(authChecked&&authUser) fetchAll(authUser)}, [authChecked,authUser]);
 
   const showToastFn = (msg,type='success') => {setToast({msg,type});setTimeout(()=>setToast(null),2500)};
   const pushNotif = (title,body,type='info') => {setNotifications(prev=>[{id:Date.now(),title,body,type,time:new Date(),read:false},...prev].slice(0,50))};
@@ -988,7 +1180,11 @@ export default function GlowBookClient() {
           const b=payload.new;
           if(b.status==='confirmed'){showToastFn('Booking confirmed! ✅');pushNotif('Confirmed',`Appointment on ${b.booking_date} confirmed`,'success')}
           else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Booking cancelled by salon','error');pushNotif('Cancelled',`Appointment on ${b.booking_date} was cancelled`,'error')}
-          else if(b.status==='completed') pushNotif('Complete','Leave a review to earn points ⭐','success');
+          else if(b.status==='completed'){
+            const earned=Math.max(1,Math.floor((b.total_amount||0)/10));
+            supabase.from('clients').update({glow_points:(client.glow_points||0)+earned,total_points_earned:(client.total_points_earned||0)+earned,total_bookings:(client.total_bookings||0)+1,total_spent:(client.total_spent||0)+(b.total_amount||0),updated_at:new Date().toISOString()}).eq('id',client.id).then(()=>{});
+            showToastFn(`+${earned} GlowPoints earned! ⭐`);pushNotif('Complete',`You earned ${earned} GlowPoints! Leave a review for bonus points ⭐`,'success');
+          }
         }
         fetchAll();
       }).subscribe();
@@ -1005,6 +1201,7 @@ export default function GlowBookClient() {
   const upcomingBookings = clientBookings.filter(b=>b.booking_date>=todayStr()&&!['cancelled','completed','no_show'].includes(b.status));
   const pastBookings = clientBookings.filter(b=>b.status==='completed'||b.status==='no_show'||(b.booking_date<todayStr()&&b.status!=='cancelled'));
   const categories = ['All',...new Set(services.map(s=>s.category).filter(Boolean))];
+  const locations = [...new Set(branches.map(b=>b.location).filter(Boolean))].sort();
 
   const [reminders,setReminders] = useState([]);
   useEffect(() => {
@@ -1025,50 +1222,65 @@ export default function GlowBookClient() {
   };
 
   const createBooking = async (flow) => {
-    if(flow.staff?.id){const{data:ex}=await supabase.from('bookings').select('id').eq('staff_id',flow.staff.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled').limit(1);if(ex?.length){showToastFn('Slot just booked — pick another','error');return}}
+    // Double-booking guard
+    if(flow.staff?.id){
+      const{data:ex}=await supabase.from('bookings').select('id').eq('staff_id',flow.staff.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled').limit(1);
+      if(ex?.length){showToastFn('Slot just booked — pick another','error');return}
+    }else{
+      // "Any Available" - check if all staff are booked at this slot
+      const branchStaff=staff.filter(s=>s.branch_id===flow.branch?.id&&s.is_active!==false);
+      const{data:ex}=await supabase.from('bookings').select('id').eq('branch_id',flow.branch.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled');
+      if((ex?.length||0)>=Math.max(branchStaff.length,1)){showToastFn('All stylists booked at this time — pick another','error');return}
+    }
     if(flow.rescheduleId){
       const{error}=await supabase.from('bookings').update({booking_date:flow.date,booking_time:flow.time,staff_id:flow.staff?.id||null,status:'pending',updated_at:new Date().toISOString()}).eq('id',flow.rescheduleId);
       if(!error){showToastFn('Rescheduled! 📅');fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');return;
     }
-    const svc=flow.service;const disc=flow.usePoints&&flow.pointsToUse>0?Math.floor(flow.pointsToUse/10):0;
-    const baseData={branch_id:flow.branch.id,client_id:client.id,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:Math.max(0,(svc.price_max||svc.price||0)-disc),discount_amount:disc,points_used:flow.pointsToUse||0,client_notes:flow.clientNotes||null,status:'pending',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+    const svc=flow.service;
+    const baseData={branch_id:flow.branch.id,client_id:client.id,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:svc.price_max||svc.price||0,client_notes:flow.clientNotes||null,status:'pending',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
     if(flow.recurring&&flow.recurringType){
-      const rid=crypto.randomUUID();const bks=[];const weeks=flow.recurringType==='weekly'?1:flow.recurringType==='biweekly'?2:4;
+      const rid=crypto.randomUUID();const weeks=flow.recurringType==='weekly'?1:flow.recurringType==='biweekly'?2:4;
       const until=flow.recurringUntil||new Date(new Date(flow.date).getTime()+weeks*4*7*86400000).toISOString().slice(0,10);
-      let d=new Date(flow.date);while(d.toISOString().slice(0,10)<=until){bks.push({...baseData,booking_date:d.toISOString().slice(0,10),recurring_id:rid,recurring_type:flow.recurringType,recurring_until:until});d=new Date(d.getTime()+weeks*7*86400000)}
+      // Check availability for all recurring dates
+      const allDates=[];let d=new Date(flow.date);while(d.toISOString().slice(0,10)<=until){allDates.push(d.toISOString().slice(0,10));d=new Date(d.getTime()+weeks*7*86400000)}
+      const{data:existing}=await supabase.from('bookings').select('booking_date,booking_time').eq('branch_id',flow.branch.id).eq('booking_time',flow.time).in('booking_date',allDates).neq('status','cancelled');
+      const conflictDates=new Set((existing||[]).map(b=>b.booking_date));
+      const bks=allDates.filter(dt=>!conflictDates.has(dt)).map(dt=>({...baseData,booking_date:dt,recurring_id:rid,recurring_type:flow.recurringType,recurring_until:until}));
+      if(!bks.length){showToastFn('All recurring dates are already booked','error');return}
+      const skipped=allDates.length-bks.length;
       const{error}=await supabase.from('bookings').insert(bks);
-      if(!error){showToastFn(`${bks.length} bookings created! 🎉`);fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');
+      if(!error){showToastFn(`${bks.length} bookings created!${skipped?' ('+skipped+' skipped — conflicts)':''} 🎉`);fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');
     }else{
       const{error}=await supabase.from('bookings').insert(baseData);
-      if(!error){if(flow.pointsToUse>0&&client.id)await supabase.from('clients').update({glow_points:Math.max(0,(client.glow_points||0)-flow.pointsToUse)}).eq('id',client.id);showToastFn('Booking confirmed! 🎉');fetchAll();setBookingFlow(null);setPage('bookings')}
+      if(!error){showToastFn('Booking confirmed! 🎉');fetchAll();setBookingFlow(null);setPage('bookings')}
       else showToastFn('Failed: '+error.message,'error');
     }
   };
 
   const rescheduleBooking = (bk) => {
     const svc=getService(bk.service_id);const br=getBranch(bk.branch_id);const stf=getStaffMember(bk.staff_id);
-    setBookingFlow({step:2,branch:br,service:svc,staff:stf||{id:null,name:'Any Available'},date:null,time:null,rescheduleId:bk.id,clientPoints:client?.glow_points||0});
+    setBookingFlow({step:2,branch:br,service:svc,staff:stf||{id:null,name:'Any Available'},date:null,time:null,rescheduleId:bk.id});
     setPage('booking');
   };
 
   // Auth gate
   if(!authChecked) return(<div style={{minHeight:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center'}}><style>{css}</style><div style={{display:'flex',gap:6}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:4,background:ACCENT,animation:`pulse 1.2s ease ${i*.2}s infinite`}}/>)}</div></div>);
-  if(!authUser&&!isDemo) return <AuthScreen onAuth={u=>setAuthUser(u)} onDemo={()=>setIsDemo(true)}/>;
+  if(!authUser) return <AuthScreen onAuth={u=>setAuthUser(u)}/>;
   if(loading) return(<div style={{minHeight:'100vh',background:BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}><style>{css}</style><div style={{fontSize:36,fontFamily:'Fraunces,serif',fontWeight:700,color:ACCENT}}>GlowBook</div><div style={{display:'flex',gap:6}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:4,background:ACCENT,animation:`pulse 1.2s ease ${i*.2}s infinite`}}/>)}</div></div>);
 
   const pages = {
-    home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}}/>,
-    explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}}/>,
+    home: <HomePage {...{branches,services,reviews,staff,bookings,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,filters,setFilters,showFilterPanel,setShowFilterPanel,locations}}/>,
+    explore: <ExplorePage {...{branches,services,reviews,bookings,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,filters,setFilters,showFilterPanel,setShowFilterPanel,locations}}/>,
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id||!s.branch_id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp}}/>,
     booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp}}/>,
-    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,isDemo,handleLogout,bp}}/>,
+    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp}}/>,
   };
 
   return(
     <>
       <style>{css}</style>
-      <AppShell page={page} setPage={pg=>{setNavHistory([]);setPage(pg)}} client={client} unreadCount={unreadCount} onNotifClick={()=>setShowNotifs(true)} onLogout={handleLogout} isDemo={isDemo} bp={bp}>
+      <AppShell page={page} setPage={pg=>{setNavHistory([]);setPage(pg)}} client={client} unreadCount={unreadCount} onNotifClick={()=>setShowNotifs(true)} onLogout={handleLogout} bp={bp}>
         {pages[page]||pages.home}
       </AppShell>
       {toast&&<Toast message={toast.msg} type={toast.type}/>}
