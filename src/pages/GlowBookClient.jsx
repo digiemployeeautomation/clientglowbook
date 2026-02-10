@@ -951,6 +951,64 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
   );
 }
 
+function SuggestionBox({source,authorName,authorEmail,branchId,showToast}) {
+  const [open,setOpen]=useState(false);
+  const [msg,setMsg]=useState('');
+  const [cat,setCat]=useState('general');
+  const [sending,setSending]=useState(false);
+  const [sent,setSent]=useState(false);
+  const cats=['general','feature request','bug report','complaint','compliment'];
+
+  const submit=async()=>{
+    if(!msg.trim())return;
+    setSending(true);
+    const{error}=await supabase.from('suggestions').insert({source,author_name:authorName||null,author_email:authorEmail||null,branch_id:branchId||null,category:cat,message:msg.trim()});
+    setSending(false);
+    if(error){showToast(error.message,'error');return}
+    setSent(true);setMsg('');
+    setTimeout(()=>{setSent(false);setOpen(false)},2500);
+    showToast('Thanks for your feedback! 💬');
+  };
+
+  if(sent) return(
+    <div style={{background:`linear-gradient(135deg,${source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT}12,${source==='client'?GOLD:typeof C!=='undefined'?C.gold:GOLD}12)`,borderRadius:18,padding:20,marginBottom:20,textAlign:'center',border:`1px solid ${source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT}20`}}>
+      <div style={{fontSize:28,marginBottom:8}}>✅</div>
+      <div style={{fontSize:15,fontWeight:700}}>Thank you!</div>
+      <div style={{fontSize:13,color:source==='client'?MUTED:typeof C!=='undefined'?C.textMuted:MUTED,marginTop:4}}>Your suggestion has been submitted</div>
+    </div>
+  );
+
+  return(
+    <div style={{marginBottom:20}}>
+      {!open?(
+        <button onClick={()=>setOpen(true)} style={{width:'100%',background:source==='client'?CARD:'#fff',borderRadius:16,padding:16,border:`1px solid ${source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8'}`,cursor:'pointer',display:'flex',gap:12,alignItems:'center',textAlign:'left'}}>
+          <div style={{width:40,height:40,borderRadius:12,background:`linear-gradient(135deg,${source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT}20,${source==='client'?GOLD:typeof C!=='undefined'?C.gold:GOLD}20)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>💡</div>
+          <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:source==='client'?DARK:typeof C!=='undefined'?C.text:'#1a1a2e'}}>Got a Suggestion?</div><div style={{fontSize:12,color:source==='client'?MUTED:typeof C!=='undefined'?C.textMuted:'#8a7e74',marginTop:2}}>Help us improve GlowBook</div></div>
+          <span style={{fontSize:16,color:source==='client'?MUTED:typeof C!=='undefined'?C.textMuted:'#8a7e74'}}>→</span>
+        </button>
+      ):(
+        <div style={{background:source==='client'?CARD:'#fff',borderRadius:18,padding:20,border:`1px solid ${source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8'}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+            <h3 style={{fontSize:16,fontWeight:700}}>💡 Suggestion Box</h3>
+            <button onClick={()=>setOpen(false)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:source==='client'?MUTED:typeof C!=='undefined'?C.textMuted:'#8a7e74',padding:4}}>×</button>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:12,fontWeight:600,color:source==='client'?MUTED:typeof C!=='undefined'?C.textMuted:'#8a7e74',display:'block',marginBottom:6}}>Category</label>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {cats.map(c=><button key={c} onClick={()=>setCat(c)} style={{padding:'6px 12px',borderRadius:20,border:`1.5px solid ${cat===c?(source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT):(source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8')}`,background:cat===c?`${source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT}12`:'transparent',color:cat===c?(source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT):(source==='client'?DARK:typeof C!=='undefined'?C.text:'#1a1a2e'),fontSize:12,fontWeight:600,cursor:'pointer',textTransform:'capitalize'}}>{c}</button>)}
+            </div>
+          </div>
+          <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Tell us what you'd like to see improved, added, or fixed..." rows={4} style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8'}`,fontSize:14,background:source==='client'?BG:'#faf7f5',color:source==='client'?DARK:typeof C!=='undefined'?C.text:'#1a1a2e',marginBottom:12,resize:'vertical',minHeight:100,fontFamily:'DM Sans,sans-serif'}}/>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>setOpen(false)} style={{flex:1,padding:'12px',borderRadius:12,border:`1px solid ${source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8'}`,background:'transparent',fontSize:14,fontWeight:600,cursor:'pointer',color:source==='client'?DARK:typeof C!=='undefined'?C.text:'#1a1a2e'}}>Cancel</button>
+            <button onClick={submit} disabled={sending||!msg.trim()} style={{flex:1,padding:'12px',borderRadius:12,border:'none',background:msg.trim()?(source==='client'?ACCENT:typeof C!=='undefined'?C.accent:ACCENT):(source==='client'?BORDER:typeof C!=='undefined'?C.border:'#e8e0d8'),color:'#fff',fontSize:14,fontWeight:600,cursor:msg.trim()?'pointer':'default',opacity:sending?.6:1}}>{sending?'Sending...':'Submit'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp,onReview,reviewedIds,getService}) {
   const totalSpent=clientBookings.filter(b=>b.status==='completed').reduce((s,b)=>s+(b.total_amount||0),0);
   const points=client.glow_points||0;
@@ -1059,6 +1117,7 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
                 ))}
               </div>
             )}
+            <SuggestionBox source="client" authorName={client.name} authorEmail={client.email} showToast={showToast}/>
             {bp!=='desktop'&&<Btn full variant="secondary" onClick={handleLogout} style={{borderRadius:14,marginBottom:20,color:'#c62828'}}>Sign Out</Btn>}
           </div>
         </div>
