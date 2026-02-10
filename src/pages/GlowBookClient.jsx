@@ -335,10 +335,23 @@ function AuthScreen({onAuth}) {
   );
 }
 
-function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}) {
+function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,onServiceCompare,bookings}) {
   const topBranches=[...branches].sort((a,b)=>{const ra=branchReviews(a.id),rb=branchReviews(b.id);return(rb.length?rb.reduce((s,r)=>s+r.rating_overall,0)/rb.length:0)-(ra.length?ra.reduce((s,r)=>s+r.rating_overall,0)/ra.length:0)});
   const recentReviews=reviews.slice(0,4);
   const pad=bp==='desktop'?'32px':'20px';
+  const [isSearching,setIsSearching]=useState(false);
+  const q=searchQuery.toLowerCase().trim();
+
+  // Smart search: match salons and services
+  const matchedBranches=q?branches.filter(b=>b.name?.toLowerCase().includes(q)||b.location?.toLowerCase().includes(q)):[];
+  const matchedServices=q?services.filter(s=>s.name?.toLowerCase().includes(q)||s.category?.toLowerCase().includes(q)):[];
+  const hasResults=matchedBranches.length>0||matchedServices.length>0;
+
+  // Sort categories by service count (most popular first)
+  const catCounts={};services.forEach(s=>{catCounts[s.category]=(catCounts[s.category]||0)+1});
+  const sortedCats=['All',...[...new Set(services.map(s=>s.category).filter(Boolean))].sort((a,b)=>(catCounts[b]||0)-(catCounts[a]||0))];
+
+  const doSearch=()=>{if(q)setIsSearching(true)};
 
   return (
     <div className="fade-up">
@@ -346,83 +359,132 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
         <div style={{maxWidth:720}}>
           <p style={{color:'rgba(255,255,255,.8)',fontSize:14,marginBottom:4}}>Welcome to</p>
           <h1 style={{fontFamily:'Fraunces,serif',fontSize:bp==='desktop'?32:26,fontWeight:700,color:'#fff',marginBottom:16}}>GlowBook ✨</h1>
-          <div style={{background:'rgba(255,255,255,.95)',borderRadius:14,display:'flex',alignItems:'center',padding:'0 14px',boxShadow:'0 4px 20px rgba(0,0,0,.08)'}}>
+          <div style={{background:'rgba(255,255,255,.95)',borderRadius:14,display:'flex',alignItems:'center',padding:'0 4px 0 14px',boxShadow:'0 4px 20px rgba(0,0,0,.08)'}}>
             <Icon name="search" size={18} color={MUTED}/>
-            <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search salons, services..." onFocus={()=>navigate('explore')} style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
+            <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);if(!e.target.value)setIsSearching(false)}} onKeyDown={e=>{if(e.key==='Enter')doSearch()}} placeholder="Search salons, services..." style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
+            {searchQuery&&<button onClick={()=>{setSearchQuery('');setIsSearching(false)}} className="touch-target" style={{background:'none',border:'none',cursor:'pointer',padding:6}}><Icon name="close" size={16} color={MUTED}/></button>}
+            <button onClick={doSearch} style={{width:40,height:40,borderRadius:12,background:q?ACCENT:BORDER,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .2s',marginLeft:4,flexShrink:0}}><Icon name="search" size={18} color={q?'#fff':MUTED}/></button>
           </div>
         </div>
       </div>
       <div style={{padding:`16px ${pad} 32px`}}>
-        {reminders?.length>0&&<div style={{marginBottom:20}}>{reminders.map(r=>{const svc=getService?.(r.service_id);const br=getBranch?.(r.branch_id);return(
-          <div key={r.id} onClick={()=>navigate('bookings')} style={{background:`linear-gradient(135deg,${ACCENT}12,${ROSE}12)`,borderRadius:16,padding:14,marginBottom:8,border:`1px solid ${ACCENT}25`,cursor:'pointer',display:'flex',gap:12,alignItems:'center'}}>
-            <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}30,${GOLD}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>⏰</div>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:700,color:ACCENT}}>Upcoming in {r.hoursUntil}h</div><div style={{fontSize:14,fontWeight:600}}>{svc?.name||'Appointment'}</div><div style={{fontSize:12,color:MUTED}}>{br?.name} · {fmtTime(r.booking_time)}</div></div>
-            <Icon name="chevR" size={16} color={ACCENT}/>
-          </div>
-        )})}</div>}
-        <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:16,marginBottom:8}}>
-          {categories.map(c=><button key={c} onClick={()=>{setSelectedCategory(c);navigate('explore')}} style={{flexShrink:0,padding:'10px 18px',borderRadius:50,border:`1.5px solid ${c===selectedCategory?ACCENT:BORDER}`,background:c===selectedCategory?`${ACCENT}12`:CARD,color:c===selectedCategory?ACCENT:DARK,fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6,minHeight:44}}>{c!=='All'&&<CatIcon cat={c}/>}{c}</button>)}
-        </div>
-        <div style={{marginBottom:28}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-            <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>Top Salons</h2>
-            <button onClick={()=>navigate('explore')} style={{background:'none',border:'none',color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44,display:'flex',alignItems:'center'}}>See all →</button>
-          </div>
-          <div className="gb-salon-list">
-            {topBranches.slice(0,bp==='desktop'?6:4).map(b=>{
-              const colors=['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
-              const bgC=colors[b.name?.length%colors.length]||'#c47d5a';
-              const avg=branchAvgRating(b.id);
-              return(
-                <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:18,overflow:'hidden',border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-3px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
-                  <div style={{height:100,background:`linear-gradient(135deg,${bgC},${bgC}dd)`,position:'relative',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <span style={{fontSize:36,opacity:.25}}>✂</span>
-                    <button onClick={e=>{e.stopPropagation();toggleFav(b.id)}} style={{position:'absolute',top:10,right:10,background:'rgba(255,255,255,.8)',border:'none',borderRadius:50,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}><Icon name="heart" size={16} color={favorites.includes(b.id)?ROSE:'#999'}/></button>
-                  </div>
-                  <div style={{padding:14}}>
-                    <h3 style={{fontSize:15,fontWeight:700,marginBottom:4}}>{b.name}</h3>
-                    <div style={{display:'flex',alignItems:'center',gap:4,fontSize:12,color:MUTED,marginBottom:6}}><Icon name="map" size={12} color={MUTED}/>{b.location||'Lusaka'}</div>
-                    <div style={{display:'flex',alignItems:'center',gap:4}}><Stars rating={Math.round(+avg)} size={12}/><span style={{fontSize:12,fontWeight:600}}>{avg}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div style={{marginBottom:28}}>
-          <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Popular Services</h2>
-          <div className="gb-grid-pop">
-            {services.slice(0,bp==='desktop'?8:6).map(s=>(
-              <div key={s.id} onClick={()=>navigate('explore',{service:s})} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-2px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
-                <div style={{marginBottom:8}}><CatIcon cat={s.category} size={24}/></div>
-                <div style={{fontSize:14,fontWeight:600,marginBottom:4,lineHeight:1.3}}>{s.name}</div>
-                <div style={{fontSize:13,color:MUTED}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
-                <div style={{fontSize:15,fontWeight:700,color:ACCENT,marginTop:6}}>K{s.price}{s.price_max&&s.price_max!==s.price?`–${s.price_max}`:''}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {recentReviews.length>0&&(
-          <div style={{marginBottom:28}}>
-            <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Recent Reviews</h2>
-            <div style={{display:'grid',gap:12,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
-              {recentReviews.map(r=>{const br=branches.find(b=>b.id===r.branch_id);return(
-                <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><span style={{fontWeight:600,fontSize:14}}>{br?.name||'Salon'}</span><Stars rating={r.rating_overall} size={12}/></div>
-                  <p style={{fontSize:13,color:MUTED,lineHeight:1.5}}>{r.review_text?.slice(0,120)}{r.review_text?.length>120?'...':''}</p>
-                </div>
-              )})}
+        {/* Inline search results */}
+        {isSearching&&q?(
+          <div style={{marginBottom:24}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+              <h2 style={{fontFamily:'Fraunces,serif',fontSize:18,fontWeight:600}}>Results for "{searchQuery}"</h2>
+              <button onClick={()=>{setSearchQuery('');setIsSearching(false)}} style={{background:'none',border:'none',color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer'}}>Clear</button>
             </div>
+            {!hasResults&&<EmptyState icon="🔍" title="No results found" sub="Try a different search term"/>}
+            {matchedBranches.length>0&&(
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:12,fontWeight:700,color:MUTED,textTransform:'uppercase',marginBottom:10,letterSpacing:.5}}>Salons</div>
+                <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
+                  {matchedBranches.map(b=>{const avg=branchAvgRating(b.id);return(
+                    <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:12,alignItems:'center'}}>
+                      <div style={{width:50,height:50,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}40,${ROSE}40)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:20}}>✂</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:700}}>{b.name}</div>
+                        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:MUTED,marginTop:2}}><Icon name="map" size={11} color={MUTED}/>{b.location||'Lusaka'}<span>•</span><Icon name="star" size={11} color={GOLD}/>{avg}</div>
+                      </div>
+                      <Icon name="chevR" size={16} color={MUTED}/>
+                    </div>
+                  )})}
+                </div>
+              </div>
+            )}
+            {matchedServices.length>0&&(
+              <div>
+                <div style={{fontSize:12,fontWeight:700,color:MUTED,textTransform:'uppercase',marginBottom:10,letterSpacing:.5}}>Services</div>
+                <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
+                  {matchedServices.map(s=>{const br=branches.find(b=>b.id===s.branch_id);return(
+                    <div key={s.id} onClick={()=>onServiceCompare(s)} style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3}}><CatIcon cat={s.category} size={14}/><span style={{fontSize:14,fontWeight:600}}>{s.name}</span></div>
+                        <div style={{fontSize:12,color:MUTED}}>{br?.name||'Salon'} • {s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
+                      </div>
+                      <div style={{fontSize:16,fontWeight:700,color:ACCENT,flexShrink:0,marginLeft:12}}>K{s.price}</div>
+                    </div>
+                  )})}
+                </div>
+              </div>
+            )}
           </div>
+        ):(
+          <>
+            {reminders?.length>0&&<div style={{marginBottom:20}}>{reminders.map(r=>{const svc=getService?.(r.service_id);const br=getBranch?.(r.branch_id);return(
+              <div key={r.id} onClick={()=>navigate('bookings')} style={{background:`linear-gradient(135deg,${ACCENT}12,${ROSE}12)`,borderRadius:16,padding:14,marginBottom:8,border:`1px solid ${ACCENT}25`,cursor:'pointer',display:'flex',gap:12,alignItems:'center'}}>
+                <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}30,${GOLD}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>⏰</div>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:700,color:ACCENT}}>Upcoming in {r.hoursUntil}h</div><div style={{fontSize:14,fontWeight:600}}>{svc?.name||'Appointment'}</div><div style={{fontSize:12,color:MUTED}}>{br?.name} · {fmtTime(r.booking_time)}</div></div>
+                <Icon name="chevR" size={16} color={ACCENT}/>
+              </div>
+            )})}</div>}
+            <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:16,marginBottom:8}}>
+              {sortedCats.map(c=><button key={c} onClick={()=>{setSelectedCategory(c);navigate('explore')}} style={{flexShrink:0,padding:'10px 18px',borderRadius:50,border:`1.5px solid ${c===selectedCategory?ACCENT:BORDER}`,background:c===selectedCategory?`${ACCENT}12`:CARD,color:c===selectedCategory?ACCENT:DARK,fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6,minHeight:44}}>{c!=='All'&&<CatIcon cat={c}/>}{c}{c!=='All'&&<span style={{fontSize:11,color:MUTED,fontWeight:400}}>({catCounts[c]||0})</span>}</button>)}
+            </div>
+            <div style={{marginBottom:28}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>Top Salons</h2>
+                <button onClick={()=>navigate('explore')} style={{background:'none',border:'none',color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44,display:'flex',alignItems:'center'}}>See all →</button>
+              </div>
+              <div className="gb-salon-list">
+                {topBranches.slice(0,bp==='desktop'?6:4).map(b=>{
+                  const colors=['#c47d5a','#d4728c','#c9a84c','#7d8cc4','#5aac7d'];
+                  const bgC=colors[b.name?.length%colors.length]||'#c47d5a';
+                  const avg=branchAvgRating(b.id);
+                  return(
+                    <div key={b.id} onClick={()=>navigate('salon',{branch:b})} style={{background:CARD,borderRadius:18,overflow:'hidden',border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-3px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
+                      <div style={{height:100,background:`linear-gradient(135deg,${bgC},${bgC}dd)`,position:'relative',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        <span style={{fontSize:36,opacity:.25}}>✂</span>
+                        <button onClick={e=>{e.stopPropagation();toggleFav(b.id)}} style={{position:'absolute',top:10,right:10,background:'rgba(255,255,255,.8)',border:'none',borderRadius:50,width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}><Icon name="heart" size={16} color={favorites.includes(b.id)?ROSE:'#999'}/></button>
+                      </div>
+                      <div style={{padding:14}}>
+                        <h3 style={{fontSize:15,fontWeight:700,marginBottom:4}}>{b.name}</h3>
+                        <div style={{display:'flex',alignItems:'center',gap:4,fontSize:12,color:MUTED,marginBottom:6}}><Icon name="map" size={12} color={MUTED}/>{b.location||'Lusaka'}</div>
+                        <div style={{display:'flex',alignItems:'center',gap:4}}><Stars rating={Math.round(+avg)} size={12}/><span style={{fontSize:12,fontWeight:600}}>{avg}</span><span style={{fontSize:11,color:MUTED}}>({branchReviews(b.id).length})</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{marginBottom:28}}>
+              <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Popular Services</h2>
+              <div className="gb-grid-pop">
+                {services.slice(0,bp==='desktop'?8:6).map(s=>(
+                  <div key={s.id} onClick={()=>onServiceCompare(s)} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',transition:'transform .2s',position:'relative',overflow:'hidden'}} onMouseEnter={e=>e.currentTarget.style.transform='translateY(-2px)'} onMouseLeave={e=>e.currentTarget.style.transform='none'}>
+                    {s.images?.[0]&&<img src={s.images[0]} alt="" style={{width:'100%',height:80,objectFit:'cover',borderRadius:10,marginBottom:8}}/>}
+                    <div style={{marginBottom:8}}>{!s.images?.[0]&&<CatIcon cat={s.category} size={24}/>}</div>
+                    <div style={{fontSize:14,fontWeight:600,marginBottom:4,lineHeight:1.3}}>{s.name}</div>
+                    <div style={{fontSize:13,color:MUTED}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
+                    <div style={{fontSize:15,fontWeight:700,color:ACCENT,marginTop:6}}>K{s.price}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {recentReviews.length>0&&(
+              <div style={{marginBottom:28}}>
+                <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600,marginBottom:14}}>Recent Reviews</h2>
+                <div style={{display:'grid',gap:12,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
+                  {recentReviews.map(r=>{const br=branches.find(b=>b.id===r.branch_id);return(
+                    <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><span style={{fontWeight:600,fontSize:14}}>{br?.name||'Salon'}</span><Stars rating={r.rating_overall} size={12}/></div>
+                      <p style={{fontSize:13,color:MUTED,lineHeight:1.5}}>{r.review_text?.slice(0,120)}{r.review_text?.length>120?'...':''}</p>
+                    </div>
+                  )})}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}) {
+function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,onServiceCompare}) {
   const q=searchQuery.toLowerCase();
-  const filteredBranches=branches.filter(b=>(!q||b.name?.toLowerCase().includes(q)||b.location?.toLowerCase().includes(q))&&(selectedCategory==='All'||services.some(s=>s.category===selectedCategory)));
+  const filteredBranches=branches.filter(b=>(!q||b.name?.toLowerCase().includes(q)||b.location?.toLowerCase().includes(q))&&(selectedCategory==='All'||services.some(s=>s.branch_id===b.id&&s.category===selectedCategory)));
   const filteredServices=services.filter(s=>(!q||s.name?.toLowerCase().includes(q)||s.category?.toLowerCase().includes(q))&&(selectedCategory==='All'||s.category===selectedCategory));
   const [viewMode,setViewMode]=useState('salons');
   const pad=bp==='desktop'?'32px':'20px';
@@ -431,10 +493,11 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
     <div className="fade-up">
       <div style={{padding:`20px ${pad} 16px`,background:CARD,borderBottom:`1px solid ${BORDER}`}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,maxWidth:640}}>
-          <div style={{flex:1,background:BG,borderRadius:14,display:'flex',alignItems:'center',padding:'0 14px',border:`1px solid ${BORDER}`}}>
+          <div style={{flex:1,background:BG,borderRadius:14,display:'flex',alignItems:'center',padding:'0 4px 0 14px',border:`1px solid ${BORDER}`}}>
             <Icon name="search" size={18} color={MUTED}/>
             <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} autoFocus placeholder="Search salons, services..." style={{flex:1,border:'none',background:'none',padding:'12px 10px',fontSize:15,color:DARK,minHeight:44}}/>
-            {searchQuery&&<button onClick={()=>setSearchQuery('')} className="touch-target" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="close" size={16} color={MUTED}/></button>}
+            {searchQuery&&<button onClick={()=>setSearchQuery('')} className="touch-target" style={{background:'none',border:'none',cursor:'pointer',padding:6}}><Icon name="close" size={16} color={MUTED}/></button>}
+            <button style={{width:38,height:38,borderRadius:10,background:q?ACCENT:BORDER,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Icon name="search" size={16} color={q?'#fff':MUTED}/></button>
           </div>
         </div>
         <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:4}}>
@@ -461,12 +524,15 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
         :<EmptyState icon="🔍" title="No salons found" sub="Try a different search"/>)
         :(filteredServices.length?
           <div className="gb-grid-services">
-            {filteredServices.map(s=>(
-              <div key={s.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}><CatIcon cat={s.category} size={16}/><span style={{fontSize:15,fontWeight:600}}>{s.name}</span></div><div style={{fontSize:12,color:MUTED}}>{s.category} • {s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
-                <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}><div style={{fontSize:16,fontWeight:700,color:ACCENT}}>K{s.price}</div>{s.price_max!==s.price&&<div style={{fontSize:11,color:MUTED}}>–K{s.price_max}</div>}</div>
+            {filteredServices.map(s=>{const br=branches.find(b=>b.id===s.branch_id);return(
+              <div key={s.id} onClick={()=>onServiceCompare(s)} style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,cursor:'pointer',overflow:'hidden'}}>
+                {s.images?.[0]&&<img src={s.images[0]} alt="" style={{width:'100%',height:80,objectFit:'cover'}}/>}
+                <div style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={{flex:1,minWidth:0}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}><CatIcon cat={s.category} size={16}/><span style={{fontSize:15,fontWeight:600}}>{s.name}</span></div><div style={{fontSize:12,color:MUTED}}>{br?.name} • {s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
+                  <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}><div style={{fontSize:16,fontWeight:700,color:ACCENT}}>K{s.price}</div></div>
+                </div>
               </div>
-            ))}
+            )})}
           </div>
         :<EmptyState icon="💇" title="No services found" sub="Try a different category"/>)}
       </div>
@@ -474,13 +540,14 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
   );
 }
 
-function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp}) {
+function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices,allBranches,onServiceCompare,onReview,clientBookings,reviewedIds}) {
   const [tab,setTab]=useState('services');
   if(!branch) return null;
   const avg=branchAvgRating(branch.id);
   const grouped={};
   services.forEach(s=>{if(!grouped[s.category])grouped[s.category]=[];grouped[s.category].push(s)});
   const pad=bp==='desktop'?'32px':'20px';
+  const completedHere=clientBookings?.filter(b=>b.branch_id===branch.id&&b.status==='completed'&&!reviewedIds?.has(b.id))||[];
 
   return (
     <div className="fade-up">
@@ -508,11 +575,18 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
           <div key={cat} style={{marginBottom:20}}>
             <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}><CatIcon cat={cat} size={16}/><h3 style={{fontSize:16,fontWeight:700}}>{cat}</h3></div>
             <div className="gb-grid-services">{svcs.map(s=>(
-              <div key={s.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min{s.deposit?` • K${s.deposit} dep`:''}</div></div>
-                <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-                  <div style={{textAlign:'right'}}><div style={{fontSize:16,fontWeight:700,color:ACCENT}}>K{s.price}</div>{s.price_max!==s.price&&<div style={{fontSize:11,color:MUTED}}>–K{s.price_max}</div>}</div>
-                  <Btn small variant="primary" onClick={()=>navigate('booking',{bookingFlow:{step:1,branch,service:s,staff:null,date:null,time:null}})}>Book</Btn>
+              <div key={s.id} style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,overflow:'hidden'}}>
+                {s.images?.[0]&&<img src={s.images[0]} alt="" style={{width:'100%',height:100,objectFit:'cover'}}/>}
+                <div style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={{flex:1,minWidth:0,cursor:'pointer'}} onClick={()=>onServiceCompare(s)}>
+                    <div style={{fontSize:15,fontWeight:600}}>{s.name}</div>
+                    <div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min • K100 dep</div>
+                    {s.description&&<div style={{fontSize:12,color:MUTED,marginTop:4,lineHeight:1.4}}>{s.description.slice(0,80)}{s.description.length>80?'...':''}</div>}
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                    <div style={{textAlign:'right'}}><div style={{fontSize:16,fontWeight:700,color:ACCENT}}>K{s.price}</div></div>
+                    <Btn small variant="primary" onClick={()=>navigate('booking',{bookingFlow:{step:1,branch,service:s,staff:null,date:null,time:null}})}>Book</Btn>
+                  </div>
                 </div>
               </div>
             ))}</div>
@@ -527,23 +601,39 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
             </div>
           ))}</div>
         :<EmptyState icon="👤" title="No team members" sub="Check back later"/>)}
-        {tab==='reviews'&&(reviews.length?
+        {tab==='reviews'&&(
           <>
-            <div style={{background:CARD,borderRadius:16,padding:20,marginBottom:16,border:`1px solid ${BORDER}`,textAlign:'center',maxWidth:280}}>
-              <div style={{fontSize:36,fontWeight:700,fontFamily:'Fraunces,serif',color:DARK}}>{avg}</div>
-              <Stars rating={Math.round(+avg)} size={18}/><div style={{fontSize:13,color:MUTED,marginTop:4}}>{reviews.length} reviews</div>
-            </div>
-            <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
-              {reviews.map(r=>(
-                <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><Stars rating={r.rating_overall} size={14}/><span style={{fontSize:11,color:MUTED}}>{r.created_at?.slice(0,10)}</span></div>
-                  <p style={{fontSize:14,lineHeight:1.6,color:DARK}}>{r.review_text}</p>
-                  {r.response_text&&<div style={{marginTop:10,padding:10,background:`${ACCENT}06`,borderRadius:10,borderLeft:`3px solid ${ACCENT}`}}><span style={{fontSize:11,fontWeight:600,color:ACCENT}}>Response:</span><p style={{fontSize:13,color:MUTED,marginTop:4}}>{r.response_text}</p></div>}
+            {completedHere.length>0&&(
+              <div style={{background:`linear-gradient(135deg,${GOLD}12,${ACCENT}12)`,borderRadius:16,padding:16,marginBottom:16,border:`1px solid ${GOLD}25`}}>
+                <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>Rate your experience ⭐</div>
+                {completedHere.slice(0,2).map(b=>(
+                  <button key={b.id} onClick={()=>onReview(b)} style={{width:'100%',background:CARD,borderRadius:12,padding:12,marginBottom:6,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',alignItems:'center',gap:10,textAlign:'left'}}>
+                    <span style={{fontSize:18}}>⭐</span>
+                    <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{b.booking_date}</div><div style={{fontSize:12,color:MUTED}}>Tap to leave a review</div></div>
+                    <Icon name="chevR" size={14} color={MUTED}/>
+                  </button>
+                ))}
+              </div>
+            )}
+            {reviews.length?(
+              <>
+                <div style={{background:CARD,borderRadius:16,padding:20,marginBottom:16,border:`1px solid ${BORDER}`,textAlign:'center',maxWidth:280}}>
+                  <div style={{fontSize:36,fontWeight:700,fontFamily:'Fraunces,serif',color:DARK}}>{avg}</div>
+                  <Stars rating={Math.round(+avg)} size={18}/><div style={{fontSize:13,color:MUTED,marginTop:4}}>{reviews.length} review{reviews.length!==1?'s':''}</div>
                 </div>
-              ))}
-            </div>
+                <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
+                  {reviews.map(r=>(
+                    <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><Stars rating={r.rating_overall} size={14}/><span style={{fontSize:11,color:MUTED}}>{r.created_at?.slice(0,10)}</span></div>
+                      <p style={{fontSize:14,lineHeight:1.6,color:DARK}}>{r.review_text}</p>
+                      {r.response_text&&<div style={{marginTop:10,padding:10,background:`${ACCENT}06`,borderRadius:10,borderLeft:`3px solid ${ACCENT}`}}><span style={{fontSize:11,fontWeight:600,color:ACCENT}}>Response:</span><p style={{fontSize:13,color:MUTED,marginTop:4}}>{r.response_text}</p></div>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ):<EmptyState icon="⭐" title="No reviews yet" sub="Be the first!"/>}
           </>
-        :<EmptyState icon="⭐" title="No reviews yet" sub="Be the first!"/>)}
+        )}
       </div>
       <div style={{position:'fixed',bottom:0,left:bp==='desktop'?SIDEBAR_W:0,right:0,padding:'12px 20px',background:'rgba(250,247,245,.92)',backdropFilter:'blur(16px)',borderTop:`1px solid ${BORDER}`,zIndex:90}}>
         <div style={{maxWidth:480}}><Btn full variant="primary" onClick={()=>navigate('booking',{bookingFlow:{step:0,branch,service:null,staff:null,date:null,time:null}})} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>Book Appointment ✨</Btn></div>
@@ -693,26 +783,22 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   ))}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:16}}>
                     <span style={{fontSize:14,color:MUTED}}>Total</span>
-                    <span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{flow.service?.price_max||flow.service?.price||0}</span>
+                    <span style={{fontSize:24,fontWeight:700,fontFamily:'Fraunces,serif',color:ACCENT}}>K{flow.service?.price||0}</span>
                   </div>
-                  {parseFloat(flow.service?.deposit)>0&&(
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,borderTop:`1px dashed ${BORDER}`,marginTop:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,borderTop:`1px dashed ${BORDER}`,marginTop:12}}>
                       <span style={{fontSize:14,fontWeight:600,color:DARK}}>Deposit (pay now)</span>
-                      <span style={{fontSize:20,fontWeight:700,fontFamily:'Fraunces,serif',color:'#2e7d32'}}>K{flow.service?.deposit}</span>
+                      <span style={{fontSize:20,fontWeight:700,fontFamily:'Fraunces,serif',color:'#2e7d32'}}>K100</span>
                     </div>
-                  )}
                 </div>
               </div>
-              {parseFloat(flow.service?.deposit)>0&&(
-                <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
+              <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                   <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>📱 Mobile Money Number</div>
-                  <div style={{fontSize:12,color:MUTED,marginBottom:10,lineHeight:1.5}}>Enter the number to pay from. You'll receive a USSD prompt to approve <strong>K{flow.service?.deposit}</strong>.</div>
+                  <div style={{fontSize:12,color:MUTED,marginBottom:10,lineHeight:1.5}}>Enter the number to pay from. You'll receive a USSD prompt to approve <strong>K100</strong>.</div>
                   <input value={flow.payerPhone||client?.phone||''} onChange={e=>update({payerPhone:e.target.value})} placeholder="e.g. 0971234567" style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:15,background:BG,color:DARK,fontFamily:'inherit',letterSpacing:0.5}} />
                   <div style={{display:'flex',gap:6,marginTop:8}}>
                     {['MTN','Airtel','Zamtel'].map(n=><span key={n} style={{fontSize:10,fontWeight:600,color:MUTED,padding:'3px 8px',borderRadius:6,background:BG,border:`1px solid ${BORDER}`}}>{n}</span>)}
                   </div>
                 </div>
-              )}
               <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                 <div style={{fontSize:14,fontWeight:600,marginBottom:8}}>Special Requests</div>
                 <textarea value={flow.clientNotes||''} onChange={e=>update({clientNotes:e.target.value})} placeholder="E.g. shoulder-length braids..." rows={3} style={{width:'100%',padding:'10px 12px',borderRadius:10,border:`1.5px solid ${BORDER}`,fontSize:13,background:BG,color:DARK,resize:'vertical',fontFamily:'inherit',minHeight:80}}/>
@@ -720,7 +806,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
             </div>
             <div>
               <div style={{background:`linear-gradient(135deg,${GOLD}08,${ACCENT}08)`,borderRadius:16,border:`1px solid ${GOLD}20`,padding:16,marginBottom:16}}>
-                <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:18}}>⭐</span><div><div style={{fontSize:14,fontWeight:600}}>You'll earn {Math.floor((flow.service?.price_max||flow.service?.price||0)/10)} GlowPoints</div><div style={{fontSize:12,color:MUTED}}>Points awarded when your appointment is completed</div></div></div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:18}}>⭐</span><div><div style={{fontSize:14,fontWeight:600}}>You'll earn {Math.floor((flow.service?.price||0)/10)} GlowPoints</div><div style={{fontSize:12,color:MUTED}}>Points awarded when your appointment is completed</div></div></div>
               </div>
               <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:flow.recurring?12:0}}>
@@ -742,8 +828,8 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               </div>
               <div style={{display:'flex',gap:10}}>
                 <Btn variant="secondary" onClick={()=>update({step:2})}>← Back</Btn>
-                <Btn variant="primary" full disabled={!!paymentState||(parseFloat(flow.service?.deposit)>0&&!(flow.payerPhone||client?.phone))} onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
-                  {parseFloat(flow.service?.deposit)>0 ? `Pay K${flow.service.deposit} & Book 💳` : flow.recurring?`Book ${flow.recurringType||'Weekly'} ✨`:'Confirm Booking ✨'}
+                <Btn variant="primary" full disabled={!!paymentState||!(flow.payerPhone||client?.phone)} onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
+                  Pay K100 & Book 💳
                 </Btn>
               </div>
             </div>
@@ -782,7 +868,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                 {paymentState.step==='waiting'&&(
                   <div style={{background:BG,borderRadius:12,padding:14,marginTop:12,border:`1px solid ${BORDER}`}}>
                     <div style={{fontSize:12,fontWeight:600,color:DARK,marginBottom:4}}>📱 Check your phone</div>
-                    <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K{flow.service?.deposit} deposit payment.</div>
+                    <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K100 deposit payment.</div>
                   </div>
                 )}
                 <button onClick={()=>setPaymentState(null)} style={{marginTop:16,background:'none',border:'none',color:MUTED,fontSize:13,cursor:'pointer',textDecoration:'underline'}}>Cancel</button>
@@ -795,7 +881,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
   );
 }
 
-function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp}) {
+function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}) {
   const [tab,setTab]=useState('upcoming');
   const [cancelTarget,setCancelTarget]=useState(null);
   const pad=bp==='desktop'?'32px':'20px';
@@ -803,6 +889,7 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
   const BookingCard = ({bk}) => {
     const svc=getService(bk.service_id);const stf=getStaffMember(bk.staff_id);const br=getBranch(bk.branch_id);
     const st=STATUS_MAP[bk.status]||STATUS_MAP.pending;
+    const canReview=bk.status==='completed'&&!reviewedIds?.has(bk.id);
     return(
       <div style={{background:CARD,borderRadius:18,overflow:'hidden',border:`1px solid ${BORDER}`}}>
         <div style={{display:'flex',gap:14,padding:16}}>
@@ -822,6 +909,7 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             {(bk.status==='confirmed'||bk.status==='pending')&&<><Btn small variant="secondary" onClick={()=>rescheduleBooking(bk)}>Reschedule</Btn><Btn small variant="outline" onClick={()=>setCancelTarget(bk)} style={{color:'#c62828',borderColor:'#c6282840'}}>Cancel</Btn></>}
             {bk.status==='completed'&&<Btn small variant="secondary" onClick={()=>navigate('salon',{branch:getBranch(bk.branch_id)})}>Rebook</Btn>}
+            {canReview&&<Btn small variant="primary" onClick={()=>onReview(bk)}>⭐ Review</Btn>}
           </div>
         </div>
       </div>
@@ -863,35 +951,29 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
   );
 }
 
-function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp}) {
+function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp,onReview,reviewedIds,getService}) {
   const totalSpent=clientBookings.filter(b=>b.status==='completed').reduce((s,b)=>s+(b.total_amount||0),0);
   const points=client.glow_points||0;
   const favBranches=branches.filter(b=>favorites.includes(b.id));
   const [editing,setEditing]=useState(false);
-  const [editForm,setEditForm]=useState({name:client.name||'',phone:client.phone||'',email:client.email||''});
+  const [editForm,setEditForm]=useState({name:client.name||'',phone:client.phone||'',email:client.email||'',area:client.area||''});
+  const [customArea,setCustomArea]=useState('');
   const [saving,setSaving]=useState(false);
-  const [reviewModal,setReviewModal]=useState(null);
-  const [reviewForm,setReviewForm]=useState({rating:5,text:'',service_q:5,cleanliness:5,value:5});
-  const [reviewedIds,setReviewedIds]=useState(new Set());
   const pad=bp==='desktop'?'32px':'20px';
 
-  useEffect(()=>{(async()=>{const{data}=await supabase.from('reviews').select('booking_id').eq('client_id',client.id);if(data)setReviewedIds(new Set(data.map(r=>r.booking_id)))})()},[client.id]);
-  const pendingReviews=clientBookings.filter(b=>b.status==='completed'&&!reviewedIds.has(b.id));
+  const LUSAKA_AREAS=['Kabulonga','Woodlands','Roma','Chelstone','Ibex Hill','Sunningdale','Makeni','Kalingalinga','Emmasdale','Kabwata','Chilenje','Matero','Northmead','Olympia','Longacres','Avondale','PHI','Chainda','Garden Compound','Mtendere','Bauleni','Lilayi','Meanwood','Silverest','Twin Palm','Foxdale','Mass Media','Other'];
+
+  useEffect(()=>{setEditForm({name:client.name||'',phone:client.phone||'',email:client.email||'',area:client.area||''})},[client]);
+
+  const pendingReviews=clientBookings.filter(b=>b.status==='completed'&&!reviewedIds?.has(b.id));
 
   const saveProfile=async()=>{
     setSaving(true);
-    const{error}=await supabase.from('clients').update({name:editForm.name,phone:editForm.phone,email:editForm.email,updated_at:new Date().toISOString()}).eq('id',client.id);
+    const area=editForm.area==='Other'?customArea:editForm.area;
+    const{error}=await supabase.from('clients').update({name:editForm.name,phone:editForm.phone,email:editForm.email,area,updated_at:new Date().toISOString()}).eq('id',client.id);
     setSaving(false);
     if(error){showToast(error.message,'error');return}
     showToast('Profile updated! ✨');setEditing(false);
-  };
-
-  const submitReview=async()=>{
-    if(!reviewModal)return;
-    const{error}=await supabase.from('reviews').insert({client_id:client.id,branch_id:reviewModal.branch_id,service_id:reviewModal.service_id,staff_id:reviewModal.staff_id,booking_id:reviewModal.id,rating_overall:reviewForm.rating,rating_service_quality:reviewForm.service_q,rating_cleanliness:reviewForm.cleanliness,rating_value_for_money:reviewForm.value,rating_average:((reviewForm.rating+reviewForm.service_q+reviewForm.cleanliness+reviewForm.value)/4),review_text:reviewForm.text,is_visible:true,moderation_status:'approved',can_edit_until:new Date(Date.now()+7*86400000).toISOString(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
-    if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToast(`Review submitted! +${pts} pts ⭐`)}
-    else showToast(error.message,'error');
-    setReviewModal(null);
   };
 
   const StarRow=({value,onChange,label})=>(<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}><span style={{fontSize:13,color:MUTED}}>{label}</span><div style={{display:'flex',gap:4}}>{[1,2,3,4,5].map(s=><span key={s} onClick={()=>onChange(s)} style={{fontSize:22,cursor:'pointer',color:s<=value?'#F59E0B':BORDER,minWidth:28,textAlign:'center'}}>{s<=value?'★':'☆'}</span>)}</div></div>);
@@ -906,6 +988,8 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
               <div style={{width:72,height:72,borderRadius:36,background:`linear-gradient(135deg,${ACCENT},${ROSE})`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,fontWeight:700,color:'#fff',margin:'0 auto 12px',border:'3px solid rgba(255,255,255,.2)'}}>{client.name?.[0]||'G'}</div>
               <h2 style={{fontSize:20,fontWeight:700,color:'#fff',fontFamily:'Fraunces,serif'}}>{client.name||'Guest'}</h2>
               {client.email&&<p style={{fontSize:13,color:'rgba(255,255,255,.6)',marginTop:4}}>{client.email}</p>}
+              {client.phone&&<p style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:2}}>{client.phone}</p>}
+              {client.area&&<p style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:2}}>📍 {client.area}</p>}
               <button onClick={()=>setEditing(true)} style={{marginTop:10,background:'rgba(255,255,255,.15)',border:'none',color:'#fff',padding:'6px 16px',borderRadius:20,fontSize:12,fontWeight:600,cursor:'pointer',minHeight:32}}>Edit Profile</button>
             </div>
             <div className="gb-grid-stats" style={{marginBottom:20}}>
@@ -934,19 +1018,30 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
             {editing&&(
               <div style={{background:CARD,borderRadius:18,padding:20,border:`1px solid ${BORDER}`,marginBottom:20}}>
                 <h3 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Edit Profile</h3>
+                <label style={{fontSize:12,fontWeight:600,color:MUTED,display:'block',marginBottom:4}}>Full Name</label>
                 <input value={editForm.name} onChange={e=>setEditForm(p=>({...p,name:e.target.value}))} placeholder="Full name" style={iStyle}/>
-                <input value={editForm.phone} onChange={e=>setEditForm(p=>({...p,phone:e.target.value}))} placeholder="Phone" style={iStyle}/>
+                <label style={{fontSize:12,fontWeight:600,color:MUTED,display:'block',marginBottom:4}}>Phone Number</label>
+                <input value={editForm.phone} onChange={e=>setEditForm(p=>({...p,phone:e.target.value}))} placeholder="e.g. 0971234567" style={iStyle}/>
+                <label style={{fontSize:12,fontWeight:600,color:MUTED,display:'block',marginBottom:4}}>Email Address</label>
                 <input value={editForm.email} onChange={e=>setEditForm(p=>({...p,email:e.target.value}))} placeholder="Email" type="email" style={iStyle}/>
-                <div style={{display:'flex',gap:10}}><Btn full variant="secondary" onClick={()=>setEditing(false)}>Cancel</Btn><Btn full variant="primary" disabled={saving} onClick={saveProfile}>{saving?'Saving...':'Save'}</Btn></div>
+                <label style={{fontSize:12,fontWeight:600,color:MUTED,display:'block',marginBottom:4}}>Area of Residence</label>
+                <select value={editForm.area} onChange={e=>setEditForm(p=>({...p,area:e.target.value}))} style={{...iStyle,appearance:'auto'}}>
+                  <option value="">Select area...</option>
+                  {LUSAKA_AREAS.map(a=><option key={a} value={a}>{a}</option>)}
+                </select>
+                {editForm.area==='Other'&&(
+                  <input value={customArea} onChange={e=>setCustomArea(e.target.value)} placeholder="Type your area..." style={iStyle}/>
+                )}
+                <div style={{display:'flex',gap:10,marginTop:4}}><Btn full variant="secondary" onClick={()=>setEditing(false)}>Cancel</Btn><Btn full variant="primary" disabled={saving} onClick={saveProfile}>{saving?'Saving...':'Save'}</Btn></div>
               </div>
             )}
             {pendingReviews.length>0&&(
               <div style={{marginBottom:20}}>
                 <h3 style={{fontSize:16,fontWeight:700,marginBottom:12}}>Leave a Review ⭐</h3>
-                {pendingReviews.slice(0,3).map(b=>{const br=getBranch(b.branch_id);return(
-                  <div key={b.id} onClick={()=>{setReviewModal(b);setReviewForm({rating:5,text:'',service_q:5,cleanliness:5,value:5})}} style={{background:CARD,borderRadius:14,padding:14,marginBottom:8,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:12,alignItems:'center',minHeight:60}}>
+                {pendingReviews.slice(0,3).map(b=>{const br=getBranch(b.branch_id);const svc=getService?.(b.service_id);return(
+                  <div key={b.id} onClick={()=>onReview(b)} style={{background:CARD,borderRadius:14,padding:14,marginBottom:8,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:12,alignItems:'center',minHeight:60}}>
                     <div style={{width:40,height:40,borderRadius:10,background:`linear-gradient(135deg,${GOLD}30,${ACCENT}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>⭐</div>
-                    <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600}}>{br?.name||'Salon'}</div><div style={{fontSize:12,color:MUTED}}>{b.booking_date} · Tap to review</div></div>
+                    <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600}}>{svc?.name||'Service'}</div><div style={{fontSize:12,color:MUTED}}>{br?.name} · {b.booking_date}</div></div>
                     <Icon name="chevR" size={16} color={MUTED}/>
                   </div>
                 )})}
@@ -968,17 +1063,6 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
           </div>
         </div>
       </div>
-      {reviewModal&&(
-        <BottomSheet open={true} onClose={()=>setReviewModal(null)} title="Write a Review">
-          <StarRow label="Overall" value={reviewForm.rating} onChange={v=>setReviewForm(p=>({...p,rating:v}))}/>
-          <StarRow label="Service Quality" value={reviewForm.service_q} onChange={v=>setReviewForm(p=>({...p,service_q:v}))}/>
-          <StarRow label="Cleanliness" value={reviewForm.cleanliness} onChange={v=>setReviewForm(p=>({...p,cleanliness:v}))}/>
-          <StarRow label="Value for Money" value={reviewForm.value} onChange={v=>setReviewForm(p=>({...p,value:v}))}/>
-          <textarea value={reviewForm.text} onChange={e=>setReviewForm(p=>({...p,text:e.target.value}))} placeholder="Tell us about your experience..." rows={4} style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:14,background:BG,color:DARK,marginTop:12,marginBottom:6,resize:'vertical',minHeight:100}}/>
-          <p style={{fontSize:11,color:MUTED,marginBottom:14}}>Earn 5 pts (+5 bonus for detailed reviews)</p>
-          <Btn full variant="primary" onClick={submitReview}>Submit Review ⭐</Btn>
-        </BottomSheet>
-      )}
     </div>
   );
 }
@@ -1006,6 +1090,10 @@ export default function GlowBookClient() {
   const [favorites,setFavorites] = useState([]);
   const [notifications,setNotifications] = useState([]);
   const [showNotifs,setShowNotifs] = useState(false);
+  const [reviewModal,setReviewModal] = useState(null);
+  const [reviewForm,setReviewForm] = useState({rating:5,text:''});
+  const [reviewedIds,setReviewedIds] = useState(new Set());
+  const [serviceCompare,setServiceCompare] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({data:{session}}) => {setAuthUser(session?.user||null);setAuthChecked(true)});
@@ -1080,6 +1168,23 @@ export default function GlowBookClient() {
   const pastBookings = clientBookings.filter(b=>b.status==='completed'||b.status==='no_show'||(b.booking_date<todayStr()&&b.status!=='cancelled'));
   const categories = ['All',...new Set(services.map(s=>s.category).filter(Boolean))];
 
+  // Fetch reviewed booking IDs
+  useEffect(()=>{if(!client?.id)return;(async()=>{const{data}=await supabase.from('reviews').select('booking_id').eq('client_id',client.id);if(data)setReviewedIds(new Set(data.map(r=>r.booking_id)))})()},[client?.id,reviews]);
+
+  // Review handler
+  const onReview=(booking)=>{setReviewModal(booking);setReviewForm({rating:5,text:''})};
+  const submitReview=async()=>{
+    if(!reviewModal)return;
+    const{error}=await supabase.from('reviews').insert({client_id:client.id,branch_id:reviewModal.branch_id,service_id:reviewModal.service_id,staff_id:reviewModal.staff_id,booking_id:reviewModal.id,rating_overall:reviewForm.rating,rating_average:reviewForm.rating,review_text:reviewForm.text,is_visible:true,moderation_status:'approved',can_edit_until:new Date(Date.now()+7*86400000).toISOString(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToastFn(`Review submitted! +${pts} pts ⭐`);fetchAll()}
+    else showToastFn(error.message,'error');
+    setReviewModal(null);
+  };
+
+  // Service compare: show other salons offering same service
+  const onServiceCompare=(svc)=>{setServiceCompare(svc)};
+  const compareResults=serviceCompare?services.filter(s=>s.name.toLowerCase()===serviceCompare.name.toLowerCase()&&s.id!==serviceCompare.id):[];
+
   const [reminders,setReminders] = useState([]);
   useEffect(() => {
     if(!upcomingBookings.length){setReminders([]);return}
@@ -1102,7 +1207,7 @@ export default function GlowBookClient() {
 
   const createBooking = async (flow) => {
     const svc = flow.service;
-    const deposit = parseFloat(svc?.deposit) || 0;
+    const deposit = 100;
     const payerPhone = flow.payerPhone || client.phone || '';
 
     // Double-booking guard
@@ -1211,7 +1316,7 @@ export default function GlowBookClient() {
     const baseData = {
       branch_id: flow.branch.id, client_id: client.id, service_id: svc.id,
       staff_id: flow.staff?.id || null, booking_date: flow.date, booking_time: flow.time,
-      duration: svc.duration_max || svc.duration || 60, total_amount: svc.price_max || svc.price || 0,
+      duration: svc.duration_max || svc.duration || 60, total_amount: parseFloat(svc.price) || 0,
       deposit_amount: depositAmount || 0, deposit_paid: depositAmount > 0, deposit_paid_at: depositAmount > 0 ? new Date().toISOString() : null,
       payment_id: paymentId || null, payment_status: depositAmount > 0 ? 'paid' : 'unpaid',
       client_notes: flow.clientNotes || null, status: depositAmount > 0 ? 'confirmed' : 'pending',
@@ -1264,12 +1369,12 @@ export default function GlowBookClient() {
   if(loading) return(<div style={{minHeight:'100vh',background:BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}><style>{css}</style><div style={{fontSize:36,fontFamily:'Fraunces,serif',fontWeight:700,color:ACCENT}}>GlowBook</div><div style={{display:'flex',gap:6}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:4,background:ACCENT,animation:`pulse 1.2s ease ${i*.2}s infinite`}}/>)}</div></div>);
 
   const pages = {
-    home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp}}/>,
-    explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp}}/>,
-    salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id||!s.branch_id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp}}/>,
-    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id||!s.branch_id),createBooking,goBack,bp,client,paymentState,setPaymentState}}/>,
-    bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp}}/>,
-    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp}}/>,
+    home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,onServiceCompare,bookings}}/>,
+    explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,onServiceCompare}}/>,
+    salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices:services,allBranches:branches,onServiceCompare,onReview,clientBookings,reviewedIds}}/>,
+    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState}}/>,
+    bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}}/>,
+    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp,onReview,reviewedIds,getService}}/>,
   };
 
   return(
@@ -1294,6 +1399,57 @@ export default function GlowBookClient() {
             ))}
           </div>
         ):<EmptyState icon="🔔" title="No notifications" sub="You're all caught up!"/>}
+      </BottomSheet>
+      {/* Review Modal */}
+      <BottomSheet open={!!reviewModal} onClose={()=>setReviewModal(null)} title="Write a Review">
+        {reviewModal&&(()=>{
+          const br=getBranch(reviewModal.branch_id);const svc=getService(reviewModal.service_id);
+          return(<>
+            <div style={{background:`${ACCENT}08`,borderRadius:12,padding:12,marginBottom:16,display:'flex',gap:10,alignItems:'center'}}>
+              <div style={{width:40,height:40,borderRadius:10,background:`linear-gradient(135deg,${ACCENT}30,${ROSE}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,flexShrink:0}}>✂</div>
+              <div><div style={{fontSize:14,fontWeight:700}}>{br?.name||'Salon'}</div><div style={{fontSize:12,color:MUTED}}>{svc?.name||'Service'} · {reviewModal.booking_date}</div></div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:600,color:DARK,marginBottom:10}}>How was your experience?</div>
+              <div style={{display:'flex',justifyContent:'center',gap:8,marginBottom:6}}>
+                {[1,2,3,4,5].map(s=><span key={s} onClick={()=>setReviewForm(p=>({...p,rating:s}))} style={{fontSize:36,cursor:'pointer',color:s<=reviewForm.rating?'#F59E0B':BORDER,transition:'transform .15s',transform:s<=reviewForm.rating?'scale(1.1)':'scale(1)'}}>{s<=reviewForm.rating?'★':'☆'}</span>)}
+              </div>
+              <div style={{textAlign:'center',fontSize:13,color:MUTED,fontWeight:500}}>{['','Poor','Fair','Good','Great','Amazing'][reviewForm.rating]}</div>
+            </div>
+            <textarea value={reviewForm.text} onChange={e=>setReviewForm(p=>({...p,text:e.target.value}))} placeholder="Tell us about your experience (optional but earns +5 bonus points)..." rows={4} style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:14,background:BG,color:DARK,marginBottom:6,resize:'vertical',minHeight:100}}/>
+            <p style={{fontSize:11,color:MUTED,marginBottom:14}}>Earn 5 pts (+5 bonus for detailed reviews)</p>
+            <Btn full variant="primary" onClick={submitReview}>Submit Review ⭐</Btn>
+          </>);
+        })()}
+      </BottomSheet>
+      {/* Service Compare Modal */}
+      <BottomSheet open={!!serviceCompare} onClose={()=>setServiceCompare(null)} title={serviceCompare?`${serviceCompare.name} — Compare`:'Compare'}>
+        {serviceCompare&&(()=>{
+          const thisBranch=branches.find(b=>b.id===serviceCompare.branch_id);
+          const others=services.filter(s=>s.name.toLowerCase()===serviceCompare.name.toLowerCase()&&s.id!==serviceCompare.id);
+          const allMatches=[serviceCompare,...others];
+          return(<>
+            <div style={{fontSize:13,color:MUTED,marginBottom:14}}>{allMatches.length} salon{allMatches.length!==1?'s':''} offer{allMatches.length===1?'s':''} this service</div>
+            <div style={{display:'grid',gap:10}}>
+              {allMatches.map(s=>{const br=branches.find(b=>b.id===s.branch_id);const avg=branchAvgRating(s.branch_id);return(
+                <div key={s.id} style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,display:'flex',gap:12,alignItems:'center'}}>
+                  {s.images?.[0]?<img src={s.images[0]} alt="" style={{width:56,height:56,borderRadius:12,objectFit:'cover',flexShrink:0}}/>:<div style={{width:56,height:56,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}30,${ROSE}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>✂</div>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700}}>{br?.name||'Salon'}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:MUTED,marginTop:2}}>
+                      <span style={{display:'flex',alignItems:'center',gap:2}}><Icon name="star" size={11} color={GOLD}/>{avg}</span>
+                      <span>•</span>
+                      <span>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</span>
+                    </div>
+                    <div style={{fontSize:16,fontWeight:700,color:ACCENT,marginTop:4}}>K{s.price}</div>
+                  </div>
+                  <Btn small variant="primary" onClick={()=>{setServiceCompare(null);navigate('booking',{bookingFlow:{step:1,branch:br,service:s,staff:null,date:null,time:null}})}}>Book</Btn>
+                </div>
+              )})}
+            </div>
+            {allMatches.length===1&&<div style={{textAlign:'center',padding:'16px 0',color:MUTED,fontSize:13}}>Only one salon offers this service right now</div>}
+          </>);
+        })()}
       </BottomSheet>
     </>
   );
