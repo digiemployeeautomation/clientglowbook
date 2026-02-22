@@ -603,6 +603,7 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
 
 function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices,allBranches,onServiceCompare,onReview,clientBookings,reviewedIds}) {
   const [tab,setTab]=useState('services');
+  const [reviewsShown,setReviewsShown]=useState(8);
   if(!branch) return null;
   const avg=branchAvgRating(branch.id);
   const grouped={};
@@ -641,7 +642,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
                 <div style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <div style={{flex:1,minWidth:0,cursor:'pointer'}} onClick={()=>onServiceCompare(s)}>
                     <div style={{fontSize:15,fontWeight:600}}>{s.name}</div>
-                    <div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min • K100 dep</div>
+                    <div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min • K{s.deposit_amount||branch?.default_deposit||100} dep</div>
                     {s.description&&<div style={{fontSize:12,color:MUTED,marginTop:4,lineHeight:1.4}}>{s.description.slice(0,80)}{s.description.length>80?'...':''}</div>}
                   </div>
                   <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
@@ -683,7 +684,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
                   <Stars rating={Math.round(+avg)} size={18}/><div style={{fontSize:13,color:MUTED,marginTop:4}}>{reviews.length} review{reviews.length!==1?'s':''}</div>
                 </div>
                 <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
-                  {reviews.map(r=>(
+                  {reviews.slice(0,reviewsShown).map(r=>(
                     <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><Stars rating={r.rating_overall} size={14}/><span style={{fontSize:11,color:MUTED}}>{r.created_at?.slice(0,10)}</span></div>
                       <p style={{fontSize:14,lineHeight:1.6,color:DARK}}>{r.review_text}</p>
@@ -691,6 +692,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
                     </div>
                   ))}
                 </div>
+                {reviews.length>reviewsShown&&<div style={{textAlign:'center',marginTop:14}}><button onClick={()=>setReviewsShown(c=>c+8)} style={{padding:'10px 28px',borderRadius:12,border:`1.5px solid ${BORDER}`,background:CARD,color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44}}>Show more reviews ({reviews.length-reviewsShown} more)</button></div>}
               </>
             ):<EmptyState icon="star" title="No reviews yet" sub="Be the first!"/>}
           </>
@@ -707,6 +709,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
   if(!flow) return null;
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
+  const deposit = parseFloat(flow.service?.deposit_amount) || parseFloat(flow.branch?.default_deposit) || 100;
   const pad=bp==='desktop'?'32px':'20px';
   const openH=parseInt(flow.branch?.open_time?.slice(0,2))||8;const openM=parseInt(flow.branch?.open_time?.slice(3,5))||0;
   const closeH=parseInt(flow.branch?.close_time?.slice(0,2))||17;const closeM=parseInt(flow.branch?.close_time?.slice(3,5))||0;
@@ -852,13 +855,13 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   </div>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:8,borderTop:`1px dashed ${BORDER}`,marginTop:12}}>
                       <span style={{fontSize:14,fontWeight:600,color:DARK}}>Deposit (pay now)</span>
-                      <span style={{fontSize:20,fontWeight:700,fontFamily:'Fraunces,serif',color:'#2e7d32'}}>K100</span>
+                      <span style={{fontSize:20,fontWeight:700,fontFamily:'Fraunces,serif',color:'#2e7d32'}}>K{deposit}</span>
                     </div>
                 </div>
               </div>
               <div style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:16,marginBottom:16}}>
                   <div style={{fontSize:14,fontWeight:600,marginBottom:4,display:'flex',alignItems:'center',gap:6}}><Icon name="smartphone" size={16} color={DARK}/> Mobile Money Number</div>
-                  <div style={{fontSize:12,color:MUTED,marginBottom:10,lineHeight:1.5}}>Enter the number to pay from. You'll receive a USSD prompt to approve <strong>K100</strong>.</div>
+                  <div style={{fontSize:12,color:MUTED,marginBottom:10,lineHeight:1.5}}>Enter the number to pay from. You'll receive a USSD prompt to approve <strong>K{deposit}</strong>.</div>
                   <input value={flow.payerPhone||client?.phone||''} onChange={e=>update({payerPhone:e.target.value})} placeholder="e.g. 0971234567" style={{width:'100%',padding:'12px 14px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:15,background:BG,color:DARK,fontFamily:'inherit',letterSpacing:0.5}} />
                   <div style={{display:'flex',gap:6,marginTop:8}}>
                     {['MTN','Airtel','Zamtel'].map(n=><span key={n} style={{fontSize:10,fontWeight:600,color:MUTED,padding:'3px 8px',borderRadius:6,background:BG,border:`1px solid ${BORDER}`}}>{n}</span>)}
@@ -894,7 +897,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               <div style={{display:'flex',gap:10}}>
                 <Btn variant="secondary" onClick={()=>update({step:2})}><Icon name="back" size={14} color={MUTED}/> Back</Btn>
                 <Btn variant="primary" full disabled={!!paymentState||!(flow.payerPhone||client?.phone)} onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
-                  Pay K100 & Book
+                  Pay K{deposit} & Book
                 </Btn>
               </div>
             </div>
@@ -962,7 +965,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                 {paymentState.step==='waiting'&&(
                   <div style={{background:BG,borderRadius:12,padding:14,marginTop:12,border:`1px solid ${BORDER}`}}>
                     <div style={{fontSize:12,fontWeight:600,color:DARK,marginBottom:4,display:'flex',alignItems:'center',gap:4}}><Icon name="smartphone" size={14} color={DARK}/> Check your phone</div>
-                    <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K100 deposit payment.</div>
+                    <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K{deposit} deposit payment.</div>
                   </div>
                 )}
                 <button onClick={cancelPayment} disabled={paymentState.step==='initiating'} style={{marginTop:16,background:'none',border:`1.5px solid #c6282840`,color:'#c62828',fontSize:13,cursor:paymentState.step==='initiating'?'not-allowed':'pointer',padding:'10px 24px',borderRadius:12,fontWeight:600,opacity:paymentState.step==='initiating'?0.4:1,transition:'all .15s'}}>Cancel Payment</button>
@@ -978,7 +981,10 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
 function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}) {
   const [tab,setTab]=useState('upcoming');
   const [cancelTarget,setCancelTarget]=useState(null);
+  const [showCount,setShowCount]=useState(10);
   const pad=bp==='desktop'?'32px':'20px';
+  const displayList = tab==='upcoming' ? upcoming : past.slice(0,showCount);
+  const hasMore = tab==='past' && past.length > showCount;
 
   const BookingCard = ({bk}) => {
     const svc=getService(bk.service_id);const stf=getStaffMember(bk.staff_id);const br=getBranch(bk.branch_id);
@@ -1015,16 +1021,17 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
       <div style={{padding:`20px ${pad} 0`,background:CARD,borderBottom:`1px solid ${BORDER}`}}>
         <h1 style={{fontFamily:'Fraunces,serif',fontSize:24,fontWeight:700,marginBottom:16}}>My Bookings</h1>
         <div style={{display:'flex',gap:4,maxWidth:300}}>
-          {['upcoming','past'].map(t=><button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:'12px 0',background:'none',border:'none',borderBottom:tab===t?`2px solid ${ACCENT}`:'2px solid transparent',color:tab===t?ACCENT:MUTED,fontSize:14,fontWeight:600,cursor:'pointer',textTransform:'capitalize',minHeight:44}}>
+          {['upcoming','past'].map(t=><button key={t} onClick={()=>{setTab(t);setShowCount(10)}} style={{flex:1,padding:'12px 0',background:'none',border:'none',borderBottom:tab===t?`2px solid ${ACCENT}`:'2px solid transparent',color:tab===t?ACCENT:MUTED,fontSize:14,fontWeight:600,cursor:'pointer',textTransform:'capitalize',minHeight:44}}>
             {t} {t==='upcoming'&&upcoming.length>0&&<span style={{background:ACCENT,color:'#fff',borderRadius:50,padding:'2px 7px',fontSize:11,marginLeft:4}}>{upcoming.length}</span>}
           </button>)}
         </div>
       </div>
       <div style={{padding:`20px ${pad} 32px`}}>
         <div style={{display:'grid',gap:12,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
-          {(tab==='upcoming'?upcoming:past).map(b=><BookingCard key={b.id} bk={b}/>)}
+          {displayList.map(b=><BookingCard key={b.id} bk={b}/>)}
         </div>
-        {!(tab==='upcoming'?upcoming:past).length&&<EmptyState icon={tab==='upcoming'?'calendar':'clipboard'} title={tab==='upcoming'?'No upcoming bookings':'No past bookings'} sub={tab==='upcoming'?'Book your next glow-up!':'History will show here'}/>}
+        {hasMore&&<div style={{textAlign:'center',marginTop:16}}><button onClick={()=>setShowCount(c=>c+10)} style={{padding:'10px 28px',borderRadius:12,border:`1.5px solid ${BORDER}`,background:CARD,color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44}}>Load more ({past.length-showCount} remaining)</button></div>}
+        {!displayList.length&&<EmptyState icon={tab==='upcoming'?'calendar':'clipboard'} title={tab==='upcoming'?'No upcoming bookings':'No past bookings'} sub={tab==='upcoming'?'Book your next glow-up!':'History will show here'}/>}
       </div>
       <BottomSheet open={!!cancelTarget} onClose={()=>setCancelTarget(null)} title="Cancel Booking">
         {cancelTarget&&(()=>{
@@ -1409,7 +1416,7 @@ export default function GlowBookClient() {
     isProcessingPayment.current = true;
 
     const svc = flow.service;
-    const deposit = 100;
+    const deposit = parseFloat(svc?.deposit_amount) || parseFloat(flow.branch?.default_deposit) || 100;
     const payerPhone = flow.payerPhone || client.phone || '';
 
     // Double-booking guard
