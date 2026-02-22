@@ -1103,7 +1103,7 @@ function SuggestionBox({source,authorName,authorEmail,branchId,showToast}) {
   );
 }
 
-function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp,onReview,reviewedIds,getService}) {
+function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigate,showToast,authUser,handleLogout,bp,onReview,reviewedIds,getService,refreshClient}) {
   const totalSpent=clientBookings.filter(b=>b.status==='completed').reduce((s,b)=>s+(b.total_amount||0),0);
   const points=client.glow_points||0;
   const favBranches=branches.filter(b=>favorites.includes(b.id));
@@ -1125,7 +1125,7 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
     const{error}=await supabase.from('clients').update({name:editForm.name,phone:editForm.phone,email:editForm.email,area,updated_at:new Date().toISOString()}).eq('id',client.id);
     setSaving(false);
     if(error){showToast('Couldn\'t update your profile. Please try again.','error');return}
-    showToast('Profile updated!');setEditing(false);
+    showToast('Profile updated!');setEditing(false);if(refreshClient)refreshClient();
   };
 
   const StarRow=({value,onChange,label})=>(<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}><span style={{fontSize:13,color:MUTED}}>{label}</span><div style={{display:'flex',gap:4}}>{[1,2,3,4,5].map(s=><span key={s} onClick={()=>onChange(s)} className="star-btn" style={{color:s<=value?'#F59E0B':BORDER,minWidth:28,textAlign:'center'}}><Star size={20} fill={s<=value?'#F59E0B':'none'} stroke={s<=value?'#F59E0B':'#ccc'} strokeWidth={1.5}/></span>)}</div></div>);
@@ -1228,10 +1228,11 @@ export default function GlowBookClient() {
   const [branches,setBranches] = useState([]);
   const [services,setServices] = useState([]);
   const [staff,setStaff] = useState([]);
-  const [clients,setClients] = useState([]);
   const [reviews,setReviews] = useState([]);
   const [bookings,setBookings] = useState([]);
   const [loading,setLoading] = useState(true);
+  const fetchDebounceRef = useRef(null);
+  const catalogLoaded = useRef(false);
   const [toast,setToast] = useState(null);
   const [selectedBranch,setSelectedBranch] = useState(null);
   const [bookingFlow,setBookingFlow] = useState(null);
@@ -1258,35 +1259,74 @@ export default function GlowBookClient() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setAuthUser(null);setClient({id:null,name:'Guest',phone:'',email:''});setPage('home');
+    setAuthUser(null);setClient({id:null,name:'Guest',phone:'',email:''});setBookings([]);setReviewedIds(new Set());setPage('home');
   };
 
-  const fetchAll = async (user) => {
-    setLoading(true);
-    try {
-      const [b,sv,st,cl,rv,bk] = await Promise.all([
-        supabase.from('branches').select('*').eq('is_active',true),
-        supabase.from('services').select('*').eq('is_active',true).order('category, name'),
-        supabase.from('staff').select('*').eq('is_active',true).order('name'),
-        supabase.from('clients').select('*'),
-        supabase.from('reviews').select('*').order('created_at',{ascending:false}),
-        supabase.from('bookings').select('*').order('booking_date',{ascending:false}),
+  // ---- CATALOG: branches, services, staff — loaded ONCE ----
+  const fetchCatalog = async () => {
+    const [b,sv,st] = await Promise.all([
+      supabase.from('branches').select('*').eq('is_active',true),
+      supabase.from('services').select('*').eq('is_active',true).order('category, name'),
+      supabase.from('staff').select('*').eq('is_active',true).order('name'),
+    ]);
+    setBranches(b.data||[]);setServices(sv.data||[]);setStaff(st.data||[]);
+    catalogLoaded.current=true;
+  };
+
+  // ---- MY DATA: client record + client's bookings + reviewed IDs ----
+  const fetchMyData = async (user) => {
+    const u = user || authUser;
+    if(!u) return;
+
+    // Find or link client record — scoped query, NOT full table scan
+    let myClient = null;
+    const{data:linked}=await supabase.from('clients').select('*').eq('auth_user_id',u.id).single();
+    if(linked) myClient=linked;
+    else {
+      const{data:byEmail}=await supabase.from('clients').select('*').eq('email',u.email).limit(1).single();
+      if(byEmail){await supabase.from('clients').update({auth_user_id:u.id}).eq('id',byEmail.id);myClient={...byEmail,auth_user_id:u.id}}
+      else myClient={id:null,name:u.user_metadata?.name||u.email,email:u.email,phone:''};
+    }
+    setClient(myClient);
+
+    // Fetch only THIS client's bookings
+    if(myClient?.id){
+      const [bk,rv] = await Promise.all([
+        supabase.from('bookings').select('*').eq('client_id',myClient.id).order('booking_date',{ascending:false}).limit(200),
+        supabase.from('reviews').select('booking_id').eq('client_id',myClient.id),
       ]);
-      setBranches(b.data||[]);setServices(sv.data||[]);setStaff(st.data||[]);setClients(cl.data||[]);setReviews(rv.data||[]);setBookings(bk.data||[]);
-      if(user){
-        const linked=(cl.data||[]).find(c=>c.auth_user_id===user.id);
-        if(linked) setClient(linked);
-        else{
-          const byEmail=(cl.data||[]).find(c=>c.email===user.email);
-          if(byEmail){await supabase.from('clients').update({auth_user_id:user.id}).eq('id',byEmail.id);setClient({...byEmail,auth_user_id:user.id})}
-          else setClient({id:null,name:user.user_metadata?.name||user.email,email:user.email,phone:''});
-        }
-      } else if(cl.data?.length) setClient(cl.data[0]);
-    } catch(e){console.error(e)}
-    setLoading(false);
+      setBookings(bk.data||[]);
+      if(rv.data) setReviewedIds(new Set(rv.data.map(r=>r.booking_id)));
+    } else {
+      setBookings([]);setReviewedIds(new Set());
+    }
   };
 
-  useEffect(() => {if(authChecked&&authUser) fetchAll(authUser)}, [authChecked,authUser]);
+  // Debounced version for realtime events (prevents rapid-fire refetches)
+  const fetchMyDataDebounced = () => {
+    if(fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+    fetchDebounceRef.current = setTimeout(()=>fetchMyData(), 300);
+  };
+
+  // ---- REVIEWS: all visible reviews (needed for branch ratings) ----
+  const fetchReviews = async () => {
+    const{data}=await supabase.from('reviews').select('*').order('created_at',{ascending:false}).limit(500);
+    setReviews(data||[]);
+  };
+
+  // ---- INITIAL LOAD ----
+  useEffect(() => {
+    if(!authChecked) return;
+    (async()=>{
+      setLoading(true);
+      try {
+        if(!catalogLoaded.current) await fetchCatalog();
+        await fetchReviews();
+        if(authUser) await fetchMyData(authUser);
+      } catch(e){console.error(e)}
+      setLoading(false);
+    })();
+  }, [authChecked,authUser]);
 
   const showToastFn = (msg,type='success') => {setToast({msg,type});setTimeout(()=>setToast(null),2500)};
   const pushNotif = (title,body,type='info') => {setNotifications(prev=>[{id:Date.now(),title,body,type,time:new Date(),read:false},...prev].slice(0,50))};
@@ -1311,7 +1351,7 @@ export default function GlowBookClient() {
             showToastFn(`+${earned} GlowPoints earned!`);pushNotif('Complete',`You earned ${earned} GlowPoints! Leave a review for bonus points`,'success');
           }
         }
-        fetchAll();
+        fetchMyDataDebounced();
       }).subscribe();
     return () => supabase.removeChannel(channel);
   }, [client?.id]);
@@ -1322,20 +1362,19 @@ export default function GlowBookClient() {
   const branchReviews = bid => reviews.filter(r=>r.branch_id===bid);
   const branchStaff = bid => staff.filter(s=>s.branch_id===bid);
   const branchAvgRating = bid => {const rv=branchReviews(bid);return rv.length?(rv.reduce((s,r)=>s+(r.rating_overall||0),0)/rv.length).toFixed(1):'—'};
-  const clientBookings = bookings.filter(b=>b.client_id===client?.id);
+  const clientBookings = bookings; // Already scoped to client in fetchMyData
   const upcomingBookings = clientBookings.filter(b=>b.booking_date>=todayStr()&&!['cancelled','completed','no_show'].includes(b.status));
   const pastBookings = clientBookings.filter(b=>b.status==='completed'||b.status==='no_show'||(b.booking_date<todayStr()&&b.status!=='cancelled'));
   const categories = ['All',...new Set(services.map(s=>s.category).filter(Boolean))];
 
-  // Fetch reviewed booking IDs
-  useEffect(()=>{if(!client?.id)return;(async()=>{const{data}=await supabase.from('reviews').select('booking_id').eq('client_id',client.id);if(data)setReviewedIds(new Set(data.map(r=>r.booking_id)))})()},[client?.id,reviews]);
+  // Fetch reviewed booking IDs — handled inside fetchMyData
 
   // Review handler
   const onReview=(booking)=>{setReviewModal(booking);setReviewForm({rating:5,text:''})};
   const submitReview=async()=>{
     if(!reviewModal)return;
     const{error}=await supabase.from('reviews').insert({client_id:client.id,branch_id:reviewModal.branch_id,service_id:reviewModal.service_id,staff_id:reviewModal.staff_id,booking_id:reviewModal.id,rating_overall:reviewForm.rating,rating_average:reviewForm.rating,review_text:reviewForm.text,is_visible:true,moderation_status:'approved',can_edit_until:new Date(Date.now()+7*86400000).toISOString(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
-    if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToastFn(`Review submitted! +${pts} pts`);fetchAll()}
+    if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToastFn(`Review submitted! +${pts} pts`);fetchMyData();fetchReviews()}
     else showToastFn('Couldn\'t submit review. Please try again.','error');
     setReviewModal(null);
   };
@@ -1359,7 +1398,7 @@ export default function GlowBookClient() {
     const bk=bookings.find(b=>b.id===id);
     if(bk){const br=branches.find(b=>b.id===bk.branch_id);const ch=br?.cancellation_hours??2;const dt=new Date(`${bk.booking_date}T${bk.booking_time||'00:00'}`);const hu=(dt-new Date())/3600000;if(hu<ch&&hu>0&&(br?.cancellation_fee_percent||0)>0)showToastFn('Late cancellation fee may apply','error')}
     const{error}=await supabase.from('bookings').update({status:'cancelled',cancelled_at:new Date().toISOString(),cancellation_reason:'Cancelled by client',cancelled_by:'client',updated_at:new Date().toISOString()}).eq('id',id);
-    if(!error){showToastFn('Booking cancelled');fetchAll()}else showToastFn('Couldn\'t cancel booking. Please try again.','error');
+    if(!error){showToastFn('Booking cancelled');fetchMyData()}else showToastFn('Couldn\'t cancel booking. Please try again.','error');
   };
 
   const SUPABASE_URL = supabase.supabaseUrl || 'https://yvupvtnpnrelbxgmwguy.supabase.co';
@@ -1387,7 +1426,7 @@ export default function GlowBookClient() {
     if(flow.rescheduleId){
       const{error}=await supabase.from('bookings').update({booking_date:flow.date,booking_time:flow.time,staff_id:flow.staff?.id||null,status:'pending',updated_at:new Date().toISOString()}).eq('id',flow.rescheduleId);
       isProcessingPayment.current=false;
-      if(!error){showToastFn('Rescheduled!');fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Couldn\'t reschedule. Please try again.','error');return;
+      if(!error){showToastFn('Rescheduled!');fetchMyData();setBookingFlow(null);setPage('bookings')}else showToastFn('Couldn\'t reschedule. Please try again.','error');return;
     }
 
     // If deposit required, initiate payment first
@@ -1482,7 +1521,7 @@ export default function GlowBookClient() {
                 // Server already created the booking — just refresh and navigate
                 isProcessingPayment.current = false;
                 showToastFn('Booking confirmed! 🎉');
-                fetchAll();
+                fetchMyData();
                 setBookingFlow(null);
                 setPage('bookings');
                 setPaymentState(null);
@@ -1558,7 +1597,7 @@ export default function GlowBookClient() {
       const skipped = allDates.length - bks.length;
       const { error } = await supabase.from('bookings').insert(bks);
       isProcessingPayment.current = false;
-      if (!error) { showToastFn(`${bks.length} bookings created!${skipped ? ' (' + skipped + ' skipped — conflicts)' : ''}!`); fetchAll(); setBookingFlow(null); setPage('bookings'); }
+      if (!error) { showToastFn(`${bks.length} bookings created!${skipped ? ' (' + skipped + ' skipped — conflicts)' : ''}!`); fetchMyData(); setBookingFlow(null); setPage('bookings'); }
       else showToastFn('Couldn\'t create bookings. Please try again.', 'error');
     } else {
       const { data: newBooking, error } = await supabase.from('bookings').insert(baseData).select('id').single();
@@ -1566,7 +1605,7 @@ export default function GlowBookClient() {
         // Link payment to booking
         if (paymentId) await supabase.from('payments').update({ booking_id: newBooking.id }).eq('id', paymentId);
         isProcessingPayment.current = false;
-        showToastFn('Booking confirmed! 🎉'); fetchAll(); setBookingFlow(null); setPage('bookings');
+        showToastFn('Booking confirmed! 🎉'); fetchMyData(); setBookingFlow(null); setPage('bookings');
       }
       else { isProcessingPayment.current = false; showToastFn('Couldn\'t create your booking. Please try again.', 'error'); }
     }
@@ -1626,7 +1665,7 @@ export default function GlowBookClient() {
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices:services,allBranches:branches,onServiceCompare,onReview,clientBookings,reviewedIds}}/>,
     booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}}/>,
-    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp,onReview,reviewedIds,getService}}/>,
+    profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp,onReview,reviewedIds,getService,refreshClient:fetchMyData}}/>,
   };
 
   return(
