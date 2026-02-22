@@ -1342,12 +1342,8 @@ export default function GlowBookClient() {
           if(b.status==='confirmed'){showToastFn('Booking confirmed!');pushNotif('Booking Confirmed',`Your appointment on ${fmtDate(b.booking_date)} at ${fmtTime(b.booking_time)} is confirmed!`,'success')}
           else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Your booking was cancelled by the salon','error');pushNotif('Booking Cancelled',`Your appointment on ${fmtDate(b.booking_date)} was cancelled by the salon. Your deposit will be refunded.`,'error')}
           else if(b.status==='completed'){
+            // GlowPoints are awarded server-side by trigger (award_glow_points_on_complete)
             const earned=Math.max(1,Math.floor((b.total_amount||0)/10));
-            // Refetch current client to avoid stale closure
-            const{data:freshClient}=await supabase.from('clients').select('glow_points,total_points_earned,total_bookings,total_spent').eq('id',client.id).single();
-            if(freshClient){
-              await supabase.from('clients').update({glow_points:(freshClient.glow_points||0)+earned,total_points_earned:(freshClient.total_points_earned||0)+earned,total_bookings:(freshClient.total_bookings||0)+1,total_spent:(freshClient.total_spent||0)+(b.total_amount||0),updated_at:new Date().toISOString()}).eq('id',client.id);
-            }
             showToastFn(`+${earned} GlowPoints earned!`);pushNotif('Complete',`You earned ${earned} GlowPoints! Leave a review for bonus points`,'success');
           }
         }
@@ -1374,7 +1370,11 @@ export default function GlowBookClient() {
   const submitReview=async()=>{
     if(!reviewModal)return;
     const{error}=await supabase.from('reviews').insert({client_id:client.id,branch_id:reviewModal.branch_id,service_id:reviewModal.service_id,staff_id:reviewModal.staff_id,booking_id:reviewModal.id,rating_overall:reviewForm.rating,rating_average:reviewForm.rating,review_text:reviewForm.text,is_visible:true,moderation_status:'approved',can_edit_until:new Date(Date.now()+7*86400000).toISOString(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
-    if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToastFn(`Review submitted! +${pts} pts`);fetchMyData();fetchReviews()}
+    if(!error){
+      // Points are awarded server-side by trigger (award_review_points)
+      const pts=5+(reviewForm.text?.length>20?5:0);
+      showToastFn(`Review submitted! +${pts} pts`);fetchMyData();fetchReviews()
+    }
     else showToastFn('Couldn\'t submit review. Please try again.','error');
     setReviewModal(null);
   };
@@ -1451,7 +1451,6 @@ export default function GlowBookClient() {
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || ''), 'apikey': apiKey },
           body: JSON.stringify({
             action: 'initiate',
-            client_id: client.id,
             branch_id: flow.branch.id,
             amount: deposit,
             payer_phone: payerPhone,
