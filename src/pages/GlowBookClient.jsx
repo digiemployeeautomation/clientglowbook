@@ -26,9 +26,28 @@ const CATEGORIES_ICONS = { Braids:'braids', Hair:'hair', Nails:'nails', Skincare
 const CatIcon = ({cat,size=18}) => { const n=CATEGORIES_ICONS[cat]; return n ? <Icon name={n} size={size} color={ACCENT}/> : <Icon name="sparkle" size={size} color={ACCENT}/> };
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const fmtDate = d => { const dt = new Date(d + 'T00:00:00'); return `${DAYS[dt.getDay()]}, ${dt.getDate()} ${MONTHS[dt.getMonth()]}`; };
-const fmtTime = t => { const [h,m] = t.split(':'); const hr = +h; return `${hr > 12 ? hr-12 : hr || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; };
+const fmtDate = d => { if(!d) return '—'; const dt = new Date(d + 'T00:00:00'); return `${DAYS[dt.getDay()]}, ${dt.getDate()} ${MONTHS[dt.getMonth()]}`; };
+const fmtTime = t => { if(!t) return '—'; const [h,m] = t.split(':'); const hr = +h; return `${hr > 12 ? hr-12 : hr || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; };
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const friendlyError = (msg) => {
+  if (!msg) return 'Something went wrong. Please try again.';
+  const m = msg.toLowerCase();
+  if (m.includes('invalid login credentials') || m.includes('invalid_credentials')) return 'Incorrect email or password. Please try again.';
+  if (m.includes('email not confirmed')) return 'Your email isn\'t verified yet. Check your inbox for a confirmation link.';
+  if (m.includes('user not found')) return 'No account found with that email. Would you like to sign up?';
+  if (m.includes('user already registered') || m.includes('already been registered')) return 'An account with this email already exists. Try signing in instead.';
+  if (m.includes('password') && m.includes('too short')) return 'Password must be at least 6 characters.';
+  if (m.includes('rate limit') || m.includes('too many requests')) return 'Too many attempts. Please wait a moment and try again.';
+  if (m.includes('network') || m.includes('fetch')) return 'Connection error. Check your internet and try again.';
+  if (m.includes('timeout')) return 'Request timed out. Please try again.';
+  if (m.includes('duplicate') || m.includes('already exists') || m.includes('unique constraint')) return 'This record already exists.';
+  if (m.includes('foreign key') || m.includes('violates')) return 'Couldn\'t save — a linked record is missing.';
+  if (m.includes('database error') || m.includes('schema')) return 'Service temporarily unavailable. Please try again in a moment.';
+  if (m.includes('jwt') || m.includes('token') || m.includes('unauthorized')) return 'Your session expired. Please sign in again.';
+  if (msg.length > 80) return 'Something went wrong. Please try again.';
+  return msg;
+};
 
 function useBreakpoint() {
   const [bp, setBp] = useState('mobile');
@@ -291,17 +310,17 @@ function AuthScreen({onAuth}) {
     setSubmitting(true);setError('');
     const{data,error:err}=await supabase.auth.signInWithPassword({email,password});
     setSubmitting(false);
-    if(err)return setError(err.message==='Email not confirmed'?'Check your email to confirm.':err.message);
+    if(err)return setError(friendlyError(err.message));
     onAuth(data.user);
   };
 
   const handleSignup=async()=>{
     if(!email||!password||!name)return setError('Name, email & password required');
-    if(password.length<6)return setError('Password min 6 chars');
+    if(password.length<6)return setError('Password must be at least 6 characters.');
     setSubmitting(true);setError('');
     const{data,error:err}=await supabase.auth.signUp({email,password,options:{data:{name,phone}}});
     setSubmitting(false);
-    if(err)return setError(err.message);
+    if(err)return setError(friendlyError(err.message));
     if(data.user){
       const code=(name.slice(0,3)+data.user.id.slice(0,4)).toUpperCase();
       const ins={auth_user_id:data.user.id,name,phone,email,referral_code:code,glow_points:0,total_points_earned:0,total_bookings:0,total_spent:0,is_active:true,account_status:'active',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
@@ -319,7 +338,7 @@ function AuthScreen({onAuth}) {
     setSubmitting(true);setError('');
     const{error:err}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin});
     setSubmitting(false);
-    if(err)return setError(err.message);
+    if(err)return setError(friendlyError(err.message));
     setMode('reset_sent');
   };
 
@@ -684,7 +703,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
   );
 }
 
-function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,client,paymentState,setPaymentState}) {
+function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment}) {
   if(!flow) return null;
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
@@ -744,7 +763,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   <div key={s.id} onClick={()=>update({service:s,step:1})} style={{background:flow.service?.id===s.id?`${ACCENT}08`:CARD,borderRadius:16,padding:16,border:flow.service?.id===s.id?`2px solid ${ACCENT}`:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',minHeight:60}}>
                     <div style={{display:'flex',gap:12,alignItems:'center',flex:1,minWidth:0}}>
                       <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}15,${ROSE}15)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><CatIcon cat={s.category} size={20}/></div>
-                      <div><div style={{fontSize:15,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
+                      <div><div style={{fontSize:15,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div></div>
                     </div>
                     <div style={{fontSize:16,fontWeight:700,color:ACCENT,flexShrink:0}}>K{s.price}</div>
                   </div>
@@ -776,7 +795,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   </div>
                 ))}
               </div>
-              <div style={{marginTop:16}}><Btn variant="ghost" onClick={()=>update({step:0})}<Icon name="back" size={14} color={MUTED}/> Back</Btn></div>
+              <div style={{marginTop:16}}><Btn variant="ghost" onClick={()=>update({step:0})}><Icon name="back" size={14} color={MUTED}/> Back</Btn></div>
             </div>
           );
         })()}
@@ -799,15 +818,19 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
               <div className="fade-up">
                 <h4 style={{fontSize:14,fontWeight:600,marginBottom:10,color:MUTED}}>TIME</h4>
                 <div className="gb-time-grid">
-                  {timeSlots.map(t=>{const sel=flow.time===t;const unavail=bookedSlots.includes(t)||blockedSlots.includes(t);return(
-                    <div key={t} onClick={()=>!unavail&&update({time:t})} style={{padding:'12px 0',borderRadius:12,textAlign:'center',cursor:unavail?'not-allowed':'pointer',fontSize:14,fontWeight:600,minHeight:44,display:'flex',alignItems:'center',justifyContent:'center',background:unavail?'#f5f5f5':sel?ACCENT:CARD,color:unavail?'#bbb':sel?'#fff':DARK,border:sel?`2px solid ${ACCENT}`:`1px solid ${unavail?'#eee':BORDER}`,opacity:unavail?.6:1}}>
+                  {timeSlots.map(t=>{const sel=flow.time===t;const unavail=bookedSlots.includes(t)||blockedSlots.includes(t);
+                    // Grey out past times for today
+                    const isPast = flow.date===todayStr() && t <= new Date().toTimeString().slice(0,5);
+                    const blocked = unavail || isPast;
+                    return(
+                    <div key={t} onClick={()=>!blocked&&update({time:t})} style={{padding:'12px 0',borderRadius:12,textAlign:'center',cursor:blocked?'not-allowed':'pointer',fontSize:14,fontWeight:600,minHeight:44,display:'flex',alignItems:'center',justifyContent:'center',background:blocked?'#f5f5f5':sel?ACCENT:CARD,color:blocked?'#bbb':sel?'#fff':DARK,border:sel?`2px solid ${ACCENT}`:`1px solid ${blocked?'#eee':BORDER}`,opacity:blocked?.6:1}}>
                       {fmtTime(t)}
                     </div>
                   )})}
                 </div>
               </div>
             )}
-            <div style={{display:'flex',gap:10,marginTop:20}}><Btn variant="ghost" onClick={()=>update({step:1})}<Icon name="back" size={14} color={MUTED}/> Back</Btn><Btn variant="primary" full disabled={!flow.date||!flow.time} onClick={()=>update({step:3})}>Continue</Btn></div>
+            <div style={{display:'flex',gap:10,marginTop:20}}><Btn variant="ghost" onClick={()=>update({step:1})}><Icon name="back" size={14} color={MUTED}/> Back</Btn><Btn variant="primary" full disabled={!flow.date||!flow.time} onClick={()=>update({step:3})}>Continue</Btn></div>
           </div>
         )}
         {step===3&&(
@@ -869,7 +892,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                 <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>Free cancellation up to {flow.branch?.cancellation_hours||2}h before. Late cancellations may incur a fee.</div>
               </div>
               <div style={{display:'flex',gap:10}}>
-                <Btn variant="secondary" onClick={()=>update({step:2})}<Icon name="back" size={14} color={MUTED}/> Back</Btn>
+                <Btn variant="secondary" onClick={()=>update({step:2})}><Icon name="back" size={14} color={MUTED}/> Back</Btn>
                 <Btn variant="primary" full disabled={!!paymentState||!(flow.payerPhone||client?.phone)} onClick={()=>createBooking(flow)} style={{borderRadius:14,fontSize:16,boxShadow:`0 4px 20px ${ACCENT}40`}}>
                   Pay K100 & Book
                 </Btn>
@@ -885,18 +908,47 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
             {paymentState.step==='failed'?(
               <>
                 <div style={{width:64,height:64,borderRadius:32,background:'#fce8e8',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',}}><Icon name="close" size={28} color="#c62828"/></div>
-                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>Payment Failed</h3>
+                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>
+                  {paymentState.isDuplicate ? 'Payment Already Pending' : 'Payment Failed'}
+                </h3>
                 <p style={{fontSize:14,color:MUTED,lineHeight:1.6,marginBottom:20}}>{paymentState.message}</p>
-                <div style={{display:'flex',gap:10}}>
-                  <Btn variant="secondary" full onClick={()=>setPaymentState(null)}>Go Back</Btn>
-                  <Btn variant="primary" full onClick={()=>{setPaymentState(null);createBooking(flow)}}>Try Again</Btn>
-                </div>
+                {paymentState.isDuplicate ? (
+                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                    <Btn variant="primary" full onClick={()=>{setPaymentState(null)}}>Wait for Existing Payment</Btn>
+                    <Btn variant="secondary" full onClick={async()=>{
+                      if(paymentState.existingPaymentId){
+                        setPaymentState({step:'cancelling',message:'Cancelling previous payment...'});
+                        try{
+                          const sbUrl=supabase.supabaseUrl||'https://yvupvtnpnrelbxgmwguy.supabase.co';
+                          const{data:{session}}=await supabase.auth.getSession();
+                          const apiKey=supabase.supabaseKey||'';
+                          await fetch(sbUrl+'/functions/v1/process-payment',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session?.access_token||''),'apikey':apiKey},body:JSON.stringify({action:'cancel',payment_id:paymentState.existingPaymentId})});
+                        }catch(e){console.warn('Cancel error:',e)}
+                        setPaymentState(null);
+                      }else{setPaymentState(null)}
+                    }}>Cancel Previous & Retry</Btn>
+                    <Btn variant="ghost" full onClick={()=>setPaymentState(null)}>Go Back</Btn>
+                  </div>
+                ) : (
+                  <div style={{display:'flex',gap:10}}>
+                    <Btn variant="secondary" full onClick={()=>setPaymentState(null)}>Go Back</Btn>
+                    <Btn variant="primary" full onClick={()=>{setPaymentState(null);createBooking(flow)}}>Try Again</Btn>
+                  </div>
+                )}
               </>
             ):paymentState.step==='success'?(
               <>
                 <div style={{width:64,height:64,borderRadius:32,background:'#e8f5e9',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',}}><Icon name="check" size={28} color="#2e7d32"/></div>
                 <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>Payment Received!</h3>
                 <p style={{fontSize:14,color:MUTED}}>Creating your booking...</p>
+              </>
+            ):paymentState.step==='cancelling'?(
+              <>
+                <div style={{width:64,height:64,borderRadius:32,background:`${ACCENT}15`,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+                  <div style={{width:32,height:32,border:`3px solid ${BORDER}`,borderTopColor:ACCENT,borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
+                </div>
+                <h3 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif',marginBottom:8}}>Cancelling Payment...</h3>
+                <p style={{fontSize:14,color:MUTED,lineHeight:1.6}}>Please wait while we cancel the payment.</p>
               </>
             ):(
               <>
@@ -913,7 +965,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                     <div style={{fontSize:11,color:MUTED,lineHeight:1.5}}>A USSD prompt has been sent. Enter your PIN to approve the K100 deposit payment.</div>
                   </div>
                 )}
-                <button onClick={()=>setPaymentState(null)} style={{marginTop:16,background:'none',border:'none',color:MUTED,fontSize:13,cursor:'pointer',textDecoration:'underline'}}>Cancel</button>
+                <button onClick={cancelPayment} disabled={paymentState.step==='initiating'} style={{marginTop:16,background:'none',border:`1.5px solid #c6282840`,color:'#c62828',fontSize:13,cursor:paymentState.step==='initiating'?'not-allowed':'pointer',padding:'10px 24px',borderRadius:12,fontWeight:600,opacity:paymentState.step==='initiating'?0.4:1,transition:'all .15s'}}>Cancel Payment</button>
               </>
             )}
           </div>
@@ -1006,7 +1058,7 @@ function SuggestionBox({source,authorName,authorEmail,branchId,showToast}) {
     setSending(true);
     const{error}=await supabase.from('suggestions').insert({source,author_name:authorName||null,author_email:authorEmail||null,branch_id:branchId||null,category:cat,message:msg.trim()});
     setSending(false);
-    if(error){showToast(error.message,'error');return}
+    if(error){showToast('Couldn\'t send your suggestion. Please try again.','error');return}
     setSent(true);setMsg('');
     setTimeout(()=>{setSent(false);setOpen(false)},2500);
     showToast('Thanks for your feedback!');
@@ -1072,7 +1124,7 @@ function ProfilePage({client,clientBookings,branches,favorites,getBranch,navigat
     const area=editForm.area==='Other'?customArea:editForm.area;
     const{error}=await supabase.from('clients').update({name:editForm.name,phone:editForm.phone,email:editForm.email,area,updated_at:new Date().toISOString()}).eq('id',client.id);
     setSaving(false);
-    if(error){showToast(error.message,'error');return}
+    if(error){showToast('Couldn\'t update your profile. Please try again.','error');return}
     showToast('Profile updated!');setEditing(false);
   };
 
@@ -1183,7 +1235,9 @@ export default function GlowBookClient() {
   const [toast,setToast] = useState(null);
   const [selectedBranch,setSelectedBranch] = useState(null);
   const [bookingFlow,setBookingFlow] = useState(null);
-  const [paymentState,setPaymentState] = useState(null); // null | {step:'initiating'|'waiting'|'verifying'|'success'|'failed', message, paymentId}
+  const [paymentState,setPaymentState] = useState(null); // null | {step:'initiating'|'waiting'|'verifying'|'success'|'failed'|'cancelling', message, paymentId}
+  const isProcessingPayment = useRef(false);
+  const paymentPollAbort = useRef(false);
   const [searchQuery,setSearchQuery] = useState('');
   const [selectedCategory,setSelectedCategory] = useState('All');
   const [client,setClient] = useState({id:null,name:'Guest',phone:'',email:''});
@@ -1245,11 +1299,15 @@ export default function GlowBookClient() {
       .on('postgres_changes',{event:'*',schema:'public',table:'bookings',filter:`client_id=eq.${client.id}`},payload=>{
         if(payload.eventType==='UPDATE'){
           const b=payload.new;
-          if(b.status==='confirmed'){showToastFn('Booking confirmed!');pushNotif('Confirmed',`Appointment on ${b.booking_date} confirmed`,'success')}
-          else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Booking cancelled by salon','error');pushNotif('Cancelled',`Appointment on ${b.booking_date} was cancelled`,'error')}
+          if(b.status==='confirmed'){showToastFn('Booking confirmed!');pushNotif('Booking Confirmed',`Your appointment on ${fmtDate(b.booking_date)} at ${fmtTime(b.booking_time)} is confirmed!`,'success')}
+          else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Your booking was cancelled by the salon','error');pushNotif('Booking Cancelled',`Your appointment on ${fmtDate(b.booking_date)} was cancelled by the salon. Your deposit will be refunded.`,'error')}
           else if(b.status==='completed'){
             const earned=Math.max(1,Math.floor((b.total_amount||0)/10));
-            supabase.from('clients').update({glow_points:(client.glow_points||0)+earned,total_points_earned:(client.total_points_earned||0)+earned,total_bookings:(client.total_bookings||0)+1,total_spent:(client.total_spent||0)+(b.total_amount||0),updated_at:new Date().toISOString()}).eq('id',client.id).then(()=>{});
+            // Refetch current client to avoid stale closure
+            const{data:freshClient}=await supabase.from('clients').select('glow_points,total_points_earned,total_bookings,total_spent').eq('id',client.id).single();
+            if(freshClient){
+              await supabase.from('clients').update({glow_points:(freshClient.glow_points||0)+earned,total_points_earned:(freshClient.total_points_earned||0)+earned,total_bookings:(freshClient.total_bookings||0)+1,total_spent:(freshClient.total_spent||0)+(b.total_amount||0),updated_at:new Date().toISOString()}).eq('id',client.id);
+            }
             showToastFn(`+${earned} GlowPoints earned!`);pushNotif('Complete',`You earned ${earned} GlowPoints! Leave a review for bonus points`,'success');
           }
         }
@@ -1278,7 +1336,7 @@ export default function GlowBookClient() {
     if(!reviewModal)return;
     const{error}=await supabase.from('reviews').insert({client_id:client.id,branch_id:reviewModal.branch_id,service_id:reviewModal.service_id,staff_id:reviewModal.staff_id,booking_id:reviewModal.id,rating_overall:reviewForm.rating,rating_average:reviewForm.rating,review_text:reviewForm.text,is_visible:true,moderation_status:'approved',can_edit_until:new Date(Date.now()+7*86400000).toISOString(),created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
     if(!error){const pts=5+(reviewForm.text?.length>20?5:0);await supabase.from('clients').update({glow_points:(client.glow_points||0)+pts,total_points_earned:(client.total_points_earned||0)+pts}).eq('id',client.id);showToastFn(`Review submitted! +${pts} pts`);fetchAll()}
-    else showToastFn(error.message,'error');
+    else showToastFn('Couldn\'t submit review. Please try again.','error');
     setReviewModal(null);
   };
 
@@ -1301,12 +1359,16 @@ export default function GlowBookClient() {
     const bk=bookings.find(b=>b.id===id);
     if(bk){const br=branches.find(b=>b.id===bk.branch_id);const ch=br?.cancellation_hours??2;const dt=new Date(`${bk.booking_date}T${bk.booking_time||'00:00'}`);const hu=(dt-new Date())/3600000;if(hu<ch&&hu>0&&(br?.cancellation_fee_percent||0)>0)showToastFn('Late cancellation fee may apply','error')}
     const{error}=await supabase.from('bookings').update({status:'cancelled',cancelled_at:new Date().toISOString(),cancellation_reason:'Cancelled by client',cancelled_by:'client',updated_at:new Date().toISOString()}).eq('id',id);
-    if(!error){showToastFn('Booking cancelled');fetchAll()}else showToastFn('Failed','error');
+    if(!error){showToastFn('Booking cancelled');fetchAll()}else showToastFn('Couldn\'t cancel booking. Please try again.','error');
   };
 
   const SUPABASE_URL = supabase.supabaseUrl || 'https://yvupvtnpnrelbxgmwguy.supabase.co';
 
   const createBooking = async (flow) => {
+    // Prevent double-clicks
+    if (isProcessingPayment.current) return;
+    isProcessingPayment.current = true;
+
     const svc = flow.service;
     const deposit = 100;
     const payerPhone = flow.payerPhone || client.phone || '';
@@ -1314,24 +1376,33 @@ export default function GlowBookClient() {
     // Double-booking guard
     if(flow.staff?.id){
       const{data:ex}=await supabase.from('bookings').select('id').eq('staff_id',flow.staff.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled').limit(1);
-      if(ex?.length){showToastFn('Slot just booked — pick another','error');return}
+      if(ex?.length){isProcessingPayment.current=false;showToastFn('Slot just booked — pick another','error');return}
     }else{
       const branchStaff=staff.filter(s=>s.branch_id===flow.branch?.id&&s.is_active!==false);
       const{data:ex}=await supabase.from('bookings').select('id').eq('branch_id',flow.branch.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled');
-      if((ex?.length||0)>=Math.max(branchStaff.length,1)){showToastFn('All stylists booked at this time — pick another','error');return}
+      if((ex?.length||0)>=Math.max(branchStaff.length,1)){isProcessingPayment.current=false;showToastFn('All stylists booked at this time — pick another','error');return}
     }
 
     // Reschedule — no payment needed
     if(flow.rescheduleId){
       const{error}=await supabase.from('bookings').update({booking_date:flow.date,booking_time:flow.time,staff_id:flow.staff?.id||null,status:'pending',updated_at:new Date().toISOString()}).eq('id',flow.rescheduleId);
-      if(!error){showToastFn('Rescheduled!');fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Failed: '+error.message,'error');return;
+      isProcessingPayment.current=false;
+      if(!error){showToastFn('Rescheduled!');fetchAll();setBookingFlow(null);setPage('bookings')}else showToastFn('Couldn\'t reschedule. Please try again.','error');return;
     }
 
     // If deposit required, initiate payment first
     if (deposit > 0) {
-      if (!payerPhone) { showToastFn('Enter your mobile money number to pay', 'error'); return; }
+      if (!payerPhone) { isProcessingPayment.current=false; showToastFn('Enter your mobile money number to pay', 'error'); return; }
+      // Validate Zambian phone number format
+      const cleanPhone = payerPhone.replace(/[\s\-()]/g, '');
+      if (!/^(?:\+?260|0)[79]\d{8}$/.test(cleanPhone)) {
+        isProcessingPayment.current=false;
+        showToastFn('Please enter a valid Zambian phone number (e.g. 0971234567)', 'error');
+        return;
+      }
 
       setPaymentState({ step: 'initiating', message: 'Initiating payment...' });
+      paymentPollAbort.current = false;
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -1345,13 +1416,38 @@ export default function GlowBookClient() {
             branch_id: flow.branch.id,
             amount: deposit,
             payer_phone: payerPhone,
-            payment_type: 'booking_deposit'
+            payment_type: 'booking_deposit',
+            booking_intent: {
+              branch_id: flow.branch.id,
+              service_id: svc.id,
+              staff_id: flow.staff?.id || null,
+              booking_date: flow.date,
+              booking_time: flow.time,
+              duration: svc.duration_max || svc.duration || 60,
+              total_amount: parseFloat(svc.price) || 0,
+              client_notes: flow.clientNotes || null,
+              recurring: flow.recurring || false,
+              recurring_type: flow.recurringType || null,
+              recurring_until: flow.recurringUntil || null
+            }
           })
         });
         const data = await res.json();
 
         if (data.error || !data.success) {
-          setPaymentState({ step: 'failed', message: data.error || 'Payment initiation failed' });
+          isProcessingPayment.current = false;
+          // Detect duplicate/pending payment
+          const errMsg = (data.error || '').toLowerCase();
+          if (errMsg.includes('recently initiated') || errMsg.includes('pending') || errMsg.includes('duplicate')) {
+            setPaymentState({ 
+              step: 'failed', 
+              message: 'You already have a payment in progress. Wait for it to complete, or cancel it and try again.',
+              isDuplicate: true,
+              existingPaymentId: data.payment_id || null
+            });
+          } else {
+            setPaymentState({ step: 'failed', message: friendlyError(data.error) || 'Couldn\'t start the payment. Please try again.' });
+          }
           return;
         }
 
@@ -1363,6 +1459,7 @@ export default function GlowBookClient() {
         const maxAttempts = 24; // 2 minutes (5s intervals)
 
         const pollVerify = async () => {
+          if (paymentPollAbort.current) return; // User cancelled
           attempts++;
           setPaymentState(ps => ({ ...ps, step: 'verifying', message: `Checking payment... (${attempts}/${maxAttempts})` }));
 
@@ -1377,19 +1474,32 @@ export default function GlowBookClient() {
             if (vData.status === 'successful') {
               setPaymentState({ step: 'success', message: 'Payment received! Creating booking...' });
 
-              // Create the booking(s) now
-              await createBookingRecords(flow, svc, paymentId, deposit);
+              // Server creates the booking from booking_intent now
+              // Only create client-side as a fallback if server didn't
+              if (!vData.booking_created && !vData.booking_id) {
+                await createBookingRecords(flow, svc, paymentId, deposit);
+              } else {
+                // Server already created the booking — just refresh and navigate
+                isProcessingPayment.current = false;
+                showToastFn('Booking confirmed! 🎉');
+                fetchAll();
+                setBookingFlow(null);
+                setPage('bookings');
+                setPaymentState(null);
+              }
               return;
             }
 
             if (vData.status === 'failed') {
-              setPaymentState({ step: 'failed', message: vData.message || 'Payment was declined. Please try again.' });
+              isProcessingPayment.current = false;
+              setPaymentState({ step: 'failed', message: vData.message || 'Payment was not approved. Please try again.' });
               return;
             }
 
             // Still pending
             if (attempts >= maxAttempts) {
-              setPaymentState({ step: 'failed', message: 'Payment timed out. If money was deducted, please contact support.' });
+              isProcessingPayment.current = false;
+              setPaymentState({ step: 'failed', message: 'Payment timed out. No money was deducted — you can safely try again. If you were charged, please contact support.' });
               return;
             }
 
@@ -1397,7 +1507,8 @@ export default function GlowBookClient() {
             setPaymentState(ps => ({ ...ps, step: 'waiting', message: 'Approve the payment on your phone...' }));
             setTimeout(pollVerify, 5000);
           } catch (e) {
-            setPaymentState({ step: 'failed', message: 'Verification error: ' + e.message });
+            isProcessingPayment.current = false;
+            setPaymentState({ step: 'failed', message: 'Couldn\'t verify your payment. Please check your mobile money balance and try again.' });
           }
         };
 
@@ -1405,11 +1516,13 @@ export default function GlowBookClient() {
         setTimeout(pollVerify, 5000);
 
       } catch (e) {
-        setPaymentState({ step: 'failed', message: 'Error: ' + e.message });
+        isProcessingPayment.current = false;
+        setPaymentState({ step: 'failed', message: e.message?.includes('fetch') || e.message?.includes('network') ? 'Connection error. Check your internet and try again.' : 'Something went wrong. Please try again.' });
       }
     } else {
       // No deposit — create booking directly
       await createBookingRecords(flow, svc, null, 0);
+      isProcessingPayment.current = false;
     }
   };
 
@@ -1441,20 +1554,51 @@ export default function GlowBookClient() {
         payment_status: i === 0 ? baseData.payment_status : 'unpaid',
         status: i === 0 ? baseData.status : 'pending'
       }));
-      if (!bks.length) { showToastFn('All recurring dates are already booked', 'error'); setPaymentState(null); return; }
+      if (!bks.length) { isProcessingPayment.current=false; showToastFn('All recurring dates are already booked', 'error'); setPaymentState(null); return; }
       const skipped = allDates.length - bks.length;
       const { error } = await supabase.from('bookings').insert(bks);
+      isProcessingPayment.current = false;
       if (!error) { showToastFn(`${bks.length} bookings created!${skipped ? ' (' + skipped + ' skipped — conflicts)' : ''}!`); fetchAll(); setBookingFlow(null); setPage('bookings'); }
-      else showToastFn('Failed: ' + error.message, 'error');
+      else showToastFn('Couldn\'t create bookings. Please try again.', 'error');
     } else {
       const { data: newBooking, error } = await supabase.from('bookings').insert(baseData).select('id').single();
       if (!error && newBooking) {
         // Link payment to booking
         if (paymentId) await supabase.from('payments').update({ booking_id: newBooking.id }).eq('id', paymentId);
-        showToastFn('Booking confirmed!!'); fetchAll(); setBookingFlow(null); setPage('bookings');
+        isProcessingPayment.current = false;
+        showToastFn('Booking confirmed! 🎉'); fetchAll(); setBookingFlow(null); setPage('bookings');
       }
-      else showToastFn('Failed: ' + (error?.message || 'Unknown error'), 'error');
+      else { isProcessingPayment.current = false; showToastFn('Couldn\'t create your booking. Please try again.', 'error'); }
     }
+    setPaymentState(null);
+  };
+
+  const cancelPayment = async () => {
+    paymentPollAbort.current = true; // Stop polling immediately
+    const paymentId = paymentState?.paymentId;
+    if (!paymentId) {
+      // No payment ID — just clear the state
+      isProcessingPayment.current = false;
+      setPaymentState(null);
+      return;
+    }
+    setPaymentState(ps => ({ ...ps, step: 'cancelling', message: 'Cancelling payment...' }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const apiKey = supabase.supabaseKey || '';
+      const res = await fetch(SUPABASE_URL + '/functions/v1/process-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || ''), 'apikey': apiKey },
+        body: JSON.stringify({ action: 'cancel', payment_id: paymentId })
+      });
+      const data = await res.json();
+      if (data.error && !data.success) {
+        console.warn('Cancel payment error:', data.error);
+      }
+    } catch (e) {
+      console.warn('Cancel payment fetch error:', e.message);
+    }
+    isProcessingPayment.current = false;
     setPaymentState(null);
   };
 
@@ -1480,7 +1624,7 @@ export default function GlowBookClient() {
     home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,onServiceCompare,bookings}}/>,
     explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,onServiceCompare}}/>,
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices:services,allBranches:branches,onServiceCompare,onReview,clientBookings,reviewedIds}}/>,
-    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState}}/>,
+    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}}/>,
     profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp,onReview,reviewedIds,getService}}/>,
   };
