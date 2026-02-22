@@ -1296,7 +1296,7 @@ export default function GlowBookClient() {
   useEffect(() => {
     if(!client?.id) return;
     const channel = supabase.channel('client-realtime')
-      .on('postgres_changes',{event:'*',schema:'public',table:'bookings',filter:`client_id=eq.${client.id}`},payload=>{
+      .on('postgres_changes',{event:'*',schema:'public',table:'bookings',filter:`client_id=eq.${client.id}`},async payload=>{
         if(payload.eventType==='UPDATE'){
           const b=payload.new;
           if(b.status==='confirmed'){showToastFn('Booking confirmed!');pushNotif('Booking Confirmed',`Your appointment on ${fmtDate(b.booking_date)} at ${fmtTime(b.booking_time)} is confirmed!`,'success')}
