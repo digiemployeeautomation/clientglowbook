@@ -170,6 +170,28 @@ const Icon = ({ name, size = 20, color = DARK, fill: fillProp, ...p }) => {
 
 const Skeleton = ({w,h,r=8,style:s}) => <div className="skeleton" style={{width:w,height:h,borderRadius:r,...s}}/>;
 
+// ── LUMINBOOK LOGO COMPONENTS ──
+const LogoIcon = ({size=36,onClick,style:s}) => (
+  <div onClick={onClick} style={{width:size,height:size,borderRadius:size*.3,cursor:onClick?'pointer':'default',flexShrink:0,...s}}>
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+      <rect width="64" height="64" rx="19" fill="url(#lbg)"/>
+      <path d="M22 18v28h20" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="38" cy="18" r="3" fill="rgba(255,255,255,0.7)"/>
+      <line x1="38" y1="18" x2="42" y2="14" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="42" y1="22" x2="48" y2="20" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="40" y1="16" x2="44" y2="10" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round"/>
+      <defs><linearGradient id="lbg" x1="0" y1="0" x2="64" y2="64"><stop stopColor="#c47d5a"/><stop offset="1" stopColor="#d4728c"/></linearGradient></defs>
+    </svg>
+  </div>
+);
+const LogoFull = ({iconSize=36,fontSize=20,onClick,dark,gap=10,sub}) => (
+  <div onClick={onClick} style={{display:'flex',alignItems:'center',gap,cursor:onClick?'pointer':'default'}} aria-label="LuminBook home">
+    <LogoIcon size={iconSize}/>
+    <div><span style={{fontFamily:'Fraunces,serif',fontSize,fontWeight:700,color:dark?'#fff':DARK}}>Lumin<span style={{color:ACCENT}}>Book</span></span>
+    {sub&&<div style={{fontSize:10,color:dark?'rgba(255,255,255,.5)':MUTED,textTransform:'uppercase',letterSpacing:1,marginTop:1}}>{sub}</div>}</div>
+  </div>
+);
+
 const LoadingSkeleton = () => (
   <div style={{padding:20}}>
     <Skeleton w="50%" h={28} style={{marginBottom:24}}/>
@@ -223,9 +245,8 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
 
   const Sidebar = () => (
     <aside style={{position:'fixed',top:0,left:0,bottom:0,width:SIDEBAR_W,background:CARD,borderRight:`1px solid ${BORDER}`,display:'flex',flexDirection:'column',zIndex:100,overflowY:'auto'}}>
-      <div style={{padding:'24px 20px 16px',display:'flex',alignItems:'center',gap:10}}>
-        <div style={{width:36,height:36,borderRadius:12,background:`linear-gradient(135deg,${ACCENT},${ROSE})`,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="sparkle" size={18} color="#fff"/></div>
-        <span style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:700,color:DARK}}>LuminBook</span>
+      <div style={{padding:'24px 20px 16px'}}>
+        <LogoFull iconSize={36} fontSize={20} onClick={()=>navTo('home')}/>
       </div>
       <nav role="navigation" aria-label="Main navigation" style={{flex:1,padding:'8px 12px'}}>
         {NAV_ITEMS.map(n=><button key={n.id} onClick={()=>navTo(n.id)} style={{display:'flex',alignItems:'center',gap:12,width:'100%',padding:'12px 14px',borderRadius:12,border:'none',cursor:'pointer',marginBottom:4,transition:'all .15s',background:page===n.id?`${ACCENT}12`:'transparent',color:page===n.id?ACCENT:MUTED,fontSize:14,fontWeight:page===n.id?600:500,textAlign:'left'}}>
@@ -251,10 +272,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
       <div onClick={()=>setDrawerOpen(false)} style={{position:'absolute',inset:0,background:'rgba(0,0,0,.4)',backdropFilter:'blur(2px)'}}/>
       <div style={{position:'relative',width:280,maxWidth:'80vw',background:CARD,height:'100%',display:'flex',flexDirection:'column',animation:drawerOpen?'slideIn .25s ease':'none',boxShadow:'4px 0 24px rgba(0,0,0,.1)'}}>
         <div style={{padding:'20px 20px 12px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:32,height:32,borderRadius:10,background:`linear-gradient(135deg,${ACCENT},${ROSE})`,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="sparkle" size={16} color="#fff"/></div>
-            <span style={{fontFamily:'Fraunces,serif',fontSize:18,fontWeight:700}}>LuminBook</span>
-          </div>
+          <LogoFull iconSize={32} fontSize={18} onClick={()=>{setDrawerOpen(false);navTo('home')}}/>
           <button onClick={()=>setDrawerOpen(false)} className="touch-target" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="close" size={22} color={MUTED}/></button>
         </div>
         <div style={{padding:'12px 20px 16px',borderBottom:`1px solid ${BORDER}`}}>
@@ -279,7 +297,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
     <header style={{position:'sticky',top:0,zIndex:100,background:'rgba(255,255,255,.92)',backdropFilter:'blur(16px)',borderBottom:`1px solid ${BORDER}`,padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',height:56}}>
       <div style={{display:'flex',alignItems:'center',gap:10}}>
         <button onClick={()=>setDrawerOpen(true)} className="touch-target" aria-label="Open menu" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="menu" size={24} color={DARK}/></button>
-        <span style={{fontFamily:'Fraunces,serif',fontSize:18,fontWeight:700,color:DARK}}>LuminBook</span>
+        <LogoFull iconSize={28} fontSize={16} onClick={()=>navTo('home')} gap={8}/>
       </div>
       <div style={{display:'flex',alignItems:'center',gap:4}}>
         <button onClick={onNotifClick} className="touch-target" aria-label="Notifications" style={{background:'none',border:'none',cursor:'pointer',position:'relative'}}>
@@ -356,8 +374,8 @@ function AuthScreen({onAuth}) {
     <div style={{minHeight:'100vh',background:BG,display:'flex',flexDirection:isWide?'row':'column'}}>
       <style>{css}</style>
       <div style={{background:`linear-gradient(135deg,${ACCENT},${ROSE})`,padding:isWide?'60px 48px':'52px 24px 36px',borderRadius:isWide?0:'0 0 32px 32px',textAlign:isWide?'left':'center',flex:isWide?'0 0 45%':'none',display:'flex',flexDirection:'column',justifyContent:'center',minHeight:isWide?'100vh':'auto'}}>
-        <div className="icon-float" style={{marginBottom:8}}><Icon name="sparkle" size={52} color="#fff"/></div>
-        <h1 style={{fontFamily:'Fraunces,serif',fontSize:isWide?40:32,fontWeight:700,color:'#fff',marginBottom:8}}>LuminBook</h1>
+        <LogoIcon size={52} style={{marginBottom:8}}/>
+        <h1 style={{fontFamily:'Fraunces,serif',fontSize:isWide?40:32,fontWeight:700,color:'#fff',marginBottom:8}}>Lumin<span style={{color:'rgba(255,255,255,.7)'}}>Book</span></h1>
         <p style={{color:'rgba(255,255,255,.85)',fontSize:isWide?18:15,maxWidth:360}}>Book beauty services near you</p>
       </div>
       <div className="fade-up" style={{padding:isWide?'48px 56px':'24px',flex:1,display:'flex',flexDirection:'column',justifyContent:'center',maxWidth:isWide?480:'100%'}}>
@@ -426,7 +444,10 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
       <div style={{background:`linear-gradient(135deg,${ACCENT},${ROSE})`,padding:bp==='desktop'?'40px 32px':'28px 20px',borderRadius:bp==='desktop'?0:'0 0 24px 24px'}}>
         <div style={{maxWidth:720}}>
           <p style={{color:'rgba(255,255,255,.8)',fontSize:14,marginBottom:4}}>Welcome to</p>
-          <h1 style={{fontFamily:'Fraunces,serif',fontSize:bp==='desktop'?32:26,fontWeight:700,color:'#fff',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>LuminBook <Icon name="sparkle" size={bp==='desktop'?24:20} color="#fff"/></h1>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+            <LogoIcon size={bp==='desktop'?40:32}/>
+            <h1 style={{fontFamily:'Fraunces,serif',fontSize:bp==='desktop'?32:26,fontWeight:700,color:'#fff'}}>Lumin<span style={{color:'rgba(255,255,255,.7)'}}>Book</span></h1>
+          </div>
           <div style={{background:'rgba(255,255,255,.95)',borderRadius:14,display:'flex',alignItems:'center',padding:'0 4px 0 14px',boxShadow:'0 4px 20px rgba(0,0,0,.08)'}}>
             <Icon name="search" size={18} color={MUTED}/>
             <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);if(!e.target.value)setIsSearching(false)}} onKeyDown={e=>{if(e.key==='Enter')doSearch()}} placeholder="Search salons, services..." style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
@@ -623,7 +644,10 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
       <div style={{height:bp==='desktop'?200:180,background:`linear-gradient(135deg,${ACCENT},${ROSE})`,position:'relative',display:'flex',alignItems:'flex-end',borderRadius:bp==='desktop'?0:'0 0 24px 24px'}}>
         {bp!=='desktop'&&<div style={{position:'absolute',top:12,left:12,right:12,display:'flex',justifyContent:'space-between'}}>
           <button onClick={goBack} className="touch-target" style={{width:40,height:40,borderRadius:20,background:'rgba(255,255,255,.2)',backdropFilter:'blur(8px)',border:'none',cursor:'pointer'}}><Icon name="back" size={20} color="#fff"/></button>
-          <button onClick={()=>toggleFav(branch.id)} className="touch-target" style={{width:40,height:40,borderRadius:20,background:'rgba(255,255,255,.2)',backdropFilter:'blur(8px)',border:'none',cursor:'pointer'}}><Icon name="heart" size={20} color={favorites.includes(branch.id)?'#fff':'rgba(255,255,255,.6)'}/></button>
+          <div style={{display:'flex',gap:8}}>
+            {branch.booking_slug&&<button onClick={()=>{const url=`${window.location.origin}/${branch.booking_slug}`;if(navigator.share)navigator.share({title:branch.name,text:`Book at ${branch.name}`,url});else{navigator.clipboard.writeText(url)}}} className="touch-target" style={{width:40,height:40,borderRadius:20,background:'rgba(255,255,255,.2)',backdropFilter:'blur(8px)',border:'none',cursor:'pointer'}}><Icon name="share" size={20} color="#fff"/></button>}
+            <button onClick={()=>toggleFav(branch.id)} className="touch-target" style={{width:40,height:40,borderRadius:20,background:'rgba(255,255,255,.2)',backdropFilter:'blur(8px)',border:'none',cursor:'pointer'}}><Icon name="heart" size={20} color={favorites.includes(branch.id)?'#fff':'rgba(255,255,255,.6)'}/></button>
+          </div>
         </div>}
         <div style={{padding:`0 ${pad} 20px`,width:'100%'}}>
           <h1 style={{fontFamily:'Fraunces,serif',fontSize:bp==='desktop'?28:24,fontWeight:700,color:'#fff',marginBottom:4}}>{branch.name}</h1>
@@ -1256,6 +1280,7 @@ export default function LuminBookClient() {
   const [paymentState,setPaymentState] = useState(null); // null | {step:'initiating'|'waiting'|'verifying'|'success'|'failed'|'cancelling', message, paymentId}
   const isProcessingPayment = useRef(false);
   const paymentPollAbort = useRef(false);
+  const deepLinkHandled = useRef(false);
   const [searchQuery,setSearchQuery] = useState('');
   const [selectedCategory,setSelectedCategory] = useState('All');
   const [client,setClient] = useState({id:null,name:'Guest',phone:'',email:''});
@@ -1359,6 +1384,20 @@ export default function LuminBookClient() {
       setLoading(false);
     })();
   }, [authChecked,authUser]);
+
+  // ---- DEEP LINK: luminbook.app/salon-slug → go to salon page ----
+  useEffect(() => {
+    if(loading || deepLinkHandled.current || !branches.length) return;
+    const path = window.location.pathname.replace(/^\/+|\/+$/g,'').toLowerCase();
+    if(!path || path==='index.html') return;
+    deepLinkHandled.current = true;
+    const match = branches.find(b => b.booking_slug === path || b.booking_slug === path.replace(/-/g,''));
+    if(match) {
+      setSelectedBranch(match); setPage('salon'); setNavHistory(['home']);
+      // Clean URL without reload
+      window.history.replaceState(null,'','/');
+    }
+  }, [loading, branches]);
 
   const showToastFn = (msg,type='success') => {setToast({msg,type});setTimeout(()=>setToast(null),2500)};
   const pushNotif = (title,body,type='info') => {setNotifications(prev=>[{id:Date.now(),title,body,type,time:new Date(),read:false},...prev].slice(0,50))};
