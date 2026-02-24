@@ -22,7 +22,7 @@ const STATUS_MAP = {
   no_show: { bg: '#fce4ec', fg: '#880e4f', label: 'No Show' },
 };
 
-const CATEGORIES_ICONS = { Braids:'braids', Hair:'hair', Nails:'nails', Skincare:'skincare', Spa:'spa', Makeup:'makeup' };
+const CATEGORIES_ICONS = { Braids:'braids', Hair:'hair', Nails:'nails', Skincare:'skincare', Spa:'spa', Makeup:'makeup', Lashes:'lashes', Barber:'barber', Wigs:'wigs', Massage:'spa', Body:'spa', Waxing:'skincare', Other:'sparkle' };
 const CatIcon = ({cat,size=18}) => { const n=CATEGORIES_ICONS[cat]; return n ? <Icon name={n} size={size} color={ACCENT}/> : <Icon name="sparkle" size={size} color={ACCENT}/> };
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -347,13 +347,17 @@ function AuthScreen({onAuth}) {
     setSubmitting(false);
     if(err)return setError(friendlyError(err.message));
     if(data.user){
-      const code=(name.slice(0,3)+data.user.id.slice(0,4)).toUpperCase();
-      const ins={auth_user_id:data.user.id,name,phone,email,referral_code:code,lumin_points:0,total_points_earned:0,total_bookings:0,total_spent:0,is_active:true,account_status:'active',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+      // Handle referral if provided (best-effort — runs before email confirmation)
       if(referralCode.trim()){
-        const{data:ref}=await supabase.from('clients').select('id').eq('referral_code',referralCode.trim().toUpperCase()).single();
-        if(ref){ins.referred_by=ref.id;await supabase.from('referrals').insert({referrer_id:ref.id,referred_email:email,referred_name:name,referral_code:referralCode.trim().toUpperCase(),status:'signed_up'})}
+        try{
+          const{data:ref}=await supabase.from('clients').select('id').eq('referral_code',referralCode.trim().toUpperCase()).single();
+          if(ref){
+            // Update the client record the trigger just created (or will create) with referral
+            await supabase.from('clients').update({referred_by:ref.id}).eq('auth_user_id',data.user.id);
+            await supabase.from('referrals').insert({referrer_id:ref.id,referred_email:email,referred_name:name,referral_code:referralCode.trim().toUpperCase(),status:'signed_up'});
+          }
+        }catch(e){console.warn('Referral link failed:',e.message)}
       }
-      await supabase.from('clients').insert(ins);
     }
     setMode('confirm');
   };
@@ -421,6 +425,47 @@ function AuthScreen({onAuth}) {
   );
 }
 
+function ResetPasswordForm({onDone}) {
+  const [pw,setPw]=useState('');
+  const [pw2,setPw2]=useState('');
+  const [error,setError]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [done,setDone]=useState(false);
+  const iStyle={width:'100%',padding:'14px 16px',borderRadius:12,border:`1.5px solid ${BORDER}`,fontSize:15,background:CARD,color:DARK,marginBottom:12,minHeight:48};
+  const handleReset=async()=>{
+    if(!pw||!pw2)return setError('Please fill in both fields');
+    if(pw.length<6)return setError('Password must be at least 6 characters');
+    if(pw!==pw2)return setError('Passwords do not match');
+    setSaving(true);setError('');
+    const{error:err}=await supabase.auth.updateUser({password:pw});
+    setSaving(false);
+    if(err)return setError(friendlyError(err.message));
+    setDone(true);
+  };
+  if(done) return(
+    <div style={{background:CARD,borderRadius:20,padding:40,maxWidth:400,width:'100%',textAlign:'center'}}>
+      <div style={{fontSize:48,marginBottom:16}}>✓</div>
+      <h2 style={{fontFamily:'Fraunces,serif',fontSize:22,fontWeight:700,marginBottom:8}}>Password updated</h2>
+      <p style={{color:MUTED,fontSize:14,marginBottom:24}}>Your password has been changed successfully.</p>
+      <Btn full variant="primary" onClick={onDone}>Continue</Btn>
+    </div>
+  );
+  return(
+    <div style={{background:CARD,borderRadius:20,padding:40,maxWidth:400,width:'100%'}}>
+      <div style={{textAlign:'center',marginBottom:24}}>
+        <div style={{fontSize:48,marginBottom:12}}>🔑</div>
+        <h2 style={{fontFamily:'Fraunces,serif',fontSize:22,fontWeight:700,marginBottom:4}}>Set new password</h2>
+        <p style={{color:MUTED,fontSize:14}}>Enter your new password below</p>
+      </div>
+      {error&&<div style={{background:'#fce4ec',color:'#c62828',padding:'12px 16px',borderRadius:12,fontSize:13,fontWeight:500,marginBottom:16}}>{error}</div>}
+      <input value={pw} onChange={e=>setPw(e.target.value)} placeholder="New password" type="password" style={iStyle} autoFocus/>
+      <input value={pw2} onChange={e=>setPw2(e.target.value)} placeholder="Confirm password" type="password" style={iStyle} onKeyDown={e=>e.key==='Enter'&&handleReset()}/>
+      <Btn full variant="primary" disabled={saving} onClick={handleReset} style={{marginBottom:12}}>{saving?'Saving...':'Update Password'}</Btn>
+      <button onClick={onDone} style={{width:'100%',background:'none',border:'none',color:MUTED,fontSize:13,cursor:'pointer',padding:8,textAlign:'center'}}>Skip for now</button>
+    </div>
+  );
+}
+
 function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,onServiceCompare,bookings}) {
   const topBranches=[...branches].sort((a,b)=>{const ra=branchReviews(a.id),rb=branchReviews(b.id);return(rb.length?rb.reduce((s,r)=>s+r.rating_overall,0)/rb.length:0)-(ra.length?ra.reduce((s,r)=>s+r.rating_overall,0)/ra.length:0)});
   const recentReviews=reviews.slice(0,4);
@@ -450,7 +495,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
           </div>
           <div style={{background:'rgba(255,255,255,.95)',borderRadius:14,display:'flex',alignItems:'center',padding:'0 4px 0 14px',boxShadow:'0 4px 20px rgba(0,0,0,.08)'}}>
             <Icon name="search" size={18} color={MUTED}/>
-            <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);if(!e.target.value)setIsSearching(false)}} onKeyDown={e=>{if(e.key==='Enter')doSearch()}} placeholder="Search salons, services..." style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
+            <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);if(!e.target.value)setIsSearching(false)}} onKeyDown={e=>{if(e.key==='Enter')doSearch()}} placeholder="Search studios & services..." style={{flex:1,border:'none',background:'none',padding:'14px 10px',fontSize:15,color:DARK,minHeight:48}}/>
             {searchQuery&&<button onClick={()=>{setSearchQuery('');setIsSearching(false)}} className="touch-target" style={{background:'none',border:'none',cursor:'pointer',padding:6}}><Icon name="close" size={16} color={MUTED}/></button>}
             <button onClick={doSearch} style={{width:40,height:40,borderRadius:12,background:q?ACCENT:BORDER,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .2s',marginLeft:4,flexShrink:0}}><Icon name="search" size={18} color={q?'#fff':MUTED}/></button>
           </div>
@@ -467,7 +512,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
             {!hasResults&&<EmptyState icon="search" title="No results found" sub="Try a different search term"/>}
             {matchedBranches.length>0&&(
               <div style={{marginBottom:20}}>
-                <div style={{fontSize:12,fontWeight:700,color:MUTED,textTransform:'uppercase',marginBottom:10,letterSpacing:.5}}>Salons</div>
+                <div style={{fontSize:12,fontWeight:700,color:MUTED,textTransform:'uppercase',marginBottom:10,letterSpacing:.5}}>Studios</div>
                 <div style={{display:'grid',gap:10,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
                   {matchedBranches.map(b=>{const avg=branchAvgRating(b.id);return(
                     <div key={b.id} onClick={()=>navigate('salon',{branch:b})} className="card-interactive" style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:12,alignItems:'center'}}>
@@ -490,7 +535,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
                     <div key={s.id} onClick={()=>onServiceCompare(s)} style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3}}><CatIcon cat={s.category} size={14}/><span style={{fontSize:14,fontWeight:600}}>{s.name}</span></div>
-                        <div style={{fontSize:12,color:MUTED}}>{br?.name||'Salon'} • {s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
+                        <div style={{fontSize:12,color:MUTED}}>{br?.name||'Studio'} • {s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min</div>
                       </div>
                       <div style={{fontSize:16,fontWeight:700,color:ACCENT,flexShrink:0,marginLeft:12}}>{fmtK(s.price)}</div>
                     </div>
@@ -513,7 +558,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
             </div>
             <div style={{marginBottom:28}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>Top Salons</h2>
+                <h2 style={{fontFamily:'Fraunces,serif',fontSize:20,fontWeight:600}}>Popular Near You</h2>
                 <button onClick={()=>navigate('explore')} style={{background:'none',border:'none',color:ACCENT,fontSize:13,fontWeight:600,cursor:'pointer',minHeight:44,display:'flex',alignItems:'center',gap:4}}>See all <Icon name="chevR" size={14} color={ACCENT}/></button>
               </div>
               <div className="gb-salon-list">
@@ -557,7 +602,7 @@ function HomePage({branches,services,reviews,staff,branchAvgRating,branchReviews
                 <div style={{display:'grid',gap:12,gridTemplateColumns:bp==='desktop'?'repeat(2,1fr)':'1fr'}}>
                   {recentReviews.map(r=>{const br=branches.find(b=>b.id===r.branch_id);return(
                     <div key={r.id} style={{background:CARD,borderRadius:16,padding:16,border:`1px solid ${BORDER}`}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><span style={{fontWeight:600,fontSize:14}}>{br?.name||'Salon'}</span><Stars rating={r.rating_overall} size={12}/></div>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><span style={{fontWeight:600,fontSize:14}}>{br?.name||'Studio'}</span><Stars rating={r.rating_overall} size={12}/></div>
                       <p style={{fontSize:13,color:MUTED,lineHeight:1.5}}>{r.review_text?.slice(0,120)}{r.review_text?.length>120?'...':''}</p>
                     </div>
                   )})}
@@ -575,7 +620,7 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
   const q=searchQuery.toLowerCase();
   const filteredBranches=branches.filter(b=>(!q||b.name?.toLowerCase().includes(q)||b.location?.toLowerCase().includes(q))&&(selectedCategory==='All'||services.some(s=>s.branch_id===b.id&&s.category===selectedCategory)));
   const filteredServices=services.filter(s=>(!q||s.name?.toLowerCase().includes(q)||s.category?.toLowerCase().includes(q))&&(selectedCategory==='All'||s.category===selectedCategory));
-  const [viewMode,setViewMode]=useState('salons');
+  const [viewMode,setViewMode]=useState('studios');
   const pad=bp==='desktop'?'32px':'20px';
 
   return (
@@ -584,7 +629,7 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,maxWidth:640}}>
           <div style={{flex:1,background:BG,borderRadius:14,display:'flex',alignItems:'center',padding:'0 4px 0 14px',border:`1px solid ${BORDER}`}}>
             <Icon name="search" size={18} color={MUTED}/>
-            <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} autoFocus placeholder="Search salons, services..." style={{flex:1,border:'none',background:'none',padding:'12px 10px',fontSize:15,color:DARK,minHeight:44}}/>
+            <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} autoFocus placeholder="Search studios & services..." style={{flex:1,border:'none',background:'none',padding:'12px 10px',fontSize:15,color:DARK,minHeight:44}}/>
             {searchQuery&&<button onClick={()=>setSearchQuery('')} className="touch-target" style={{background:'none',border:'none',cursor:'pointer',padding:6}}><Icon name="close" size={16} color={MUTED}/></button>}
             <button style={{width:38,height:38,borderRadius:10,background:q?ACCENT:BORDER,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Icon name="search" size={16} color={q?'#fff':MUTED}/></button>
           </div>
@@ -594,10 +639,10 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
         </div>
       </div>
       <div style={{padding:`14px ${pad}`,display:'flex',gap:8,maxWidth:300}}>
-        {['salons','services'].map(v=><button key={v} onClick={()=>setViewMode(v)} style={{flex:1,padding:'10px',borderRadius:10,border:'none',fontWeight:600,fontSize:13,minHeight:40,background:viewMode===v?DARK:'#f0ebe7',color:viewMode===v?'#fff':DARK,cursor:'pointer',textTransform:'capitalize'}}>{v}</button>)}
+        {['studios','services'].map(v=><button key={v} onClick={()=>setViewMode(v)} style={{flex:1,padding:'10px',borderRadius:10,border:'none',fontWeight:600,fontSize:13,minHeight:40,background:viewMode===v?DARK:'#f0ebe7',color:viewMode===v?'#fff':DARK,cursor:'pointer',textTransform:'capitalize'}}>{v}</button>)}
       </div>
       <div style={{padding:`0 ${pad} 32px`}}>
-        {viewMode==='salons'?(filteredBranches.length?
+        {viewMode==='studios'?(filteredBranches.length?
           <div className="gb-salon-list">
             {filteredBranches.map(b=>(
               <div key={b.id} onClick={()=>navigate('salon',{branch:b})} className="card-interactive" style={{background:CARD,borderRadius:18,padding:16,border:`1px solid ${BORDER}`,cursor:'pointer',display:'flex',gap:14}}>
@@ -610,7 +655,7 @@ function ExplorePage({branches,services,reviews,branchAvgRating,branchReviews,na
               </div>
             ))}
           </div>
-        :<EmptyState icon="search" title="No salons found" sub="Try a different search"/>)
+        :<EmptyState icon="search" title="No results found" sub="Try a different search"/>)
         :(filteredServices.length?
           <div className="gb-grid-services">
             {filteredServices.map(s=>{const br=branches.find(b=>b.id===s.branch_id);return(
@@ -878,7 +923,7 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
                   <h4 style={{fontSize:18,fontWeight:700,fontFamily:'Fraunces,serif'}}>{flow.service?.name}</h4>
                 </div>
                 <div style={{padding:20}}>
-                  {[{label:'Salon',value:flow.branch?.name,icon:'map'},{label:'Stylist',value:flow.staff?.name||'Any Available',icon:'user'},{label:'Date',value:flow.date?fmtDate(flow.date):'—',icon:'calendar'},{label:'Time',value:flow.time?fmtTime(flow.time):'—',icon:'clock'}].map(item=>(
+                  {[{label:'Location',value:flow.branch?.name,icon:'map'},{label:'Stylist',value:flow.staff?.name||'Any Available',icon:'user'},{label:'Date',value:flow.date?fmtDate(flow.date):'—',icon:'calendar'},{label:'Time',value:flow.time?fmtTime(flow.time):'—',icon:'clock'}].map(item=>(
                     <div key={item.label} style={{display:'flex',alignItems:'center',padding:'10px 0',borderBottom:`1px solid ${BORDER}`}}><Icon name={item.icon} size={16} color={MUTED}/><span style={{fontSize:13,color:MUTED,marginLeft:10,width:70}}>{item.label}</span><span style={{fontSize:14,fontWeight:600,flex:1}}>{item.value}</span></div>
                   ))}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:16}}>
@@ -1028,7 +1073,7 @@ function MyBookingsPage({upcoming,past,getService,getStaffMember,getBranch,cance
           <div style={{width:52,height:52,borderRadius:14,background:`linear-gradient(135deg,${ACCENT}20,${ROSE}20)`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><CatIcon cat={svc?.category} size={22}/></div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:4,gap:8}}><h4 style={{fontSize:15,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{svc?.name||'Service'}</h4><Badge bg={st.bg} fg={st.fg}>{st.label}</Badge></div>
-            <div style={{fontSize:13,color:MUTED,marginBottom:2}}>{br?.name||'Salon'}</div>
+            <div style={{fontSize:13,color:MUTED,marginBottom:2}}>{br?.name||'Studio'}</div>
             <div style={{display:'flex',alignItems:'center',gap:12,fontSize:12,color:MUTED,flexWrap:'wrap'}}>
               <span style={{display:'flex',alignItems:'center',gap:3}}><Icon name="calendar" size={12} color={MUTED}/>{fmtDate(bk.booking_date)}</span>
               <span style={{display:'flex',alignItems:'center',gap:3}}><Icon name="clock" size={12} color={MUTED}/>{fmtTime(bk.booking_time)}</span>
@@ -1281,6 +1326,7 @@ export default function LuminBookClient() {
   const isProcessingPayment = useRef(false);
   const paymentPollAbort = useRef(false);
   const deepLinkHandled = useRef(false);
+  const initialPath = useRef(window.location.pathname.replace(/^\/+|\/+$/g,'').toLowerCase());
   const [searchQuery,setSearchQuery] = useState('');
   const [selectedCategory,setSelectedCategory] = useState('All');
   const [client,setClient] = useState({id:null,name:'Guest',phone:'',email:''});
@@ -1294,9 +1340,14 @@ export default function LuminBookClient() {
   const [reviewedIds,setReviewedIds] = useState(new Set());
   const [serviceCompare,setServiceCompare] = useState(null);
 
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
   useEffect(() => {
     supabase.auth.getSession().then(({data:{session}}) => {setAuthUser(session?.user||null);setAuthChecked(true)});
-    const {data:{subscription}} = supabase.auth.onAuthStateChange((_event,session) => {setAuthUser(session?.user||null)});
+    const {data:{subscription}} = supabase.auth.onAuthStateChange((event,session) => {
+      setAuthUser(session?.user||null);
+      if(event==='PASSWORD_RECOVERY') setShowResetPassword(true);
+    });
     return () => subscription.unsubscribe();
   }, []);
 
@@ -1335,14 +1386,29 @@ export default function LuminBookClient() {
     const u = user || authUser;
     if(!u) return;
 
-    // Find or link client record — scoped query, NOT full table scan
+    // Find client record: by auth_user_id first, then by email
     let myClient = null;
     const{data:linked}=await supabase.from('clients').select('*').eq('auth_user_id',u.id).single();
     if(linked) myClient=linked;
     else {
-      const{data:byEmail}=await supabase.from('clients').select('*').eq('email',u.email).limit(1).single();
-      if(byEmail){await supabase.from('clients').update({auth_user_id:u.id}).eq('id',byEmail.id);myClient={...byEmail,auth_user_id:u.id}}
-      else myClient={id:null,name:u.user_metadata?.name||u.email,email:u.email,phone:''};
+      const{data:byEmail}=await supabase.from('clients').select('*').eq('email',u.email.toLowerCase()).limit(1).single();
+      if(byEmail){
+        const{error:linkErr}=await supabase.from('clients').update({auth_user_id:u.id,updated_at:new Date().toISOString()}).eq('id',byEmail.id);
+        if(!linkErr) myClient={...byEmail,auth_user_id:u.id};
+        else myClient=byEmail;
+      }
+      else {
+        // FALLBACK: No client record exists — create one now
+        // This catches cases where the DB trigger didn't fire or the signup insert failed
+        const code=(((u.user_metadata?.name||u.email).replace(/[^a-zA-Z]/g,'')).slice(0,3)+u.id.slice(0,4)).toUpperCase();
+        const ins={auth_user_id:u.id,name:u.user_metadata?.name||u.email.split('@')[0],phone:u.user_metadata?.phone||'',email:u.email.toLowerCase(),referral_code:code,lumin_points:0,total_points_earned:0,total_bookings:0,total_spent:0,is_active:true,account_status:'active',created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+        const{data:created,error:createErr}=await supabase.from('clients').insert(ins).select().single();
+        if(created) myClient=created;
+        else {
+          console.warn('Fallback client create failed:',createErr?.message);
+          myClient={id:null,name:u.user_metadata?.name||u.email,email:u.email,phone:''};
+        }
+      }
     }
     setClient(myClient);
 
@@ -1385,16 +1451,15 @@ export default function LuminBookClient() {
     })();
   }, [authChecked,authUser]);
 
-  // ---- DEEP LINK: luminbook.app/salon-slug → go to salon page ----
+  // ---- DEEP LINK: luminbook.app/business-slug → go straight to business page ----
   useEffect(() => {
     if(loading || deepLinkHandled.current || !branches.length) return;
-    const path = window.location.pathname.replace(/^\/+|\/+$/g,'').toLowerCase();
+    const path = initialPath.current;
     if(!path || path==='index.html') return;
     deepLinkHandled.current = true;
-    const match = branches.find(b => b.booking_slug === path || b.booking_slug === path.replace(/-/g,''));
+    const match = branches.find(b => b.booking_slug && (b.booking_slug === path || b.booking_slug === path.replace(/-/g,'')));
     if(match) {
       setSelectedBranch(match); setPage('salon'); setNavHistory(['home']);
-      // Clean URL without reload
       window.history.replaceState(null,'','/');
     }
   }, [loading, branches]);
@@ -1411,7 +1476,7 @@ export default function LuminBookClient() {
         if(payload.eventType==='UPDATE'){
           const b=payload.new;
           if(b.status==='confirmed'){showToastFn('Booking confirmed!');pushNotif('Booking Confirmed',`Your appointment on ${fmtDate(b.booking_date)} at ${fmtTime(b.booking_time)} is confirmed!`,'success')}
-          else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Your booking was cancelled by the salon','error');pushNotif('Booking Cancelled',`Your appointment on ${fmtDate(b.booking_date)} was cancelled by the salon. Your deposit will be refunded.`,'error')}
+          else if(b.status==='cancelled'&&b.cancelled_by==='business'){showToastFn('Your booking was cancelled by the studio','error');pushNotif('Booking Cancelled',`Your appointment on ${fmtDate(b.booking_date)} was cancelled by the studio. Your deposit will be refunded.`,'error')}
           else if(b.status==='completed'){
             // LuminPoints are awarded server-side by trigger (award_lumin_points_on_complete)
             const earned=Math.max(1,Math.floor((b.total_amount||0)/10));
@@ -1742,6 +1807,9 @@ export default function LuminBookClient() {
   return(
     <>
       <style>{css}</style>
+      {showResetPassword&&<div style={{position:'fixed',inset:0,zIndex:3000,background:'rgba(0,0,0,.5)',backdropFilter:'blur(8px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+        <ResetPasswordForm onDone={()=>setShowResetPassword(false)}/>
+      </div>}
       {isOffline&&<div role="alert" style={{position:'fixed',top:0,left:0,right:0,zIndex:2100,background:'#c62828',color:'#fff',textAlign:'center',padding:'8px 16px',fontSize:13,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}><Icon name="xCircle" size={14} color="#fff"/>You're offline — check your connection</div>}
       <AppShell page={page} setPage={pg=>{setNavHistory([]);setPage(pg)}} client={client} unreadCount={unreadCount} onNotifClick={()=>setShowNotifs(true)} onLogout={handleLogout} bp={bp}>
         <div key={page} className="page-in" role="main">{pages[page]||pages.home}</div>
@@ -1770,7 +1838,7 @@ export default function LuminBookClient() {
           return(<>
             <div style={{background:`${ACCENT}08`,borderRadius:12,padding:12,marginBottom:16,display:'flex',gap:10,alignItems:'center'}}>
               <div style={{width:40,height:40,borderRadius:10,background:`linear-gradient(135deg,${ACCENT}30,${ROSE}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,flexShrink:0}}>✂</div>
-              <div><div style={{fontSize:14,fontWeight:700}}>{br?.name||'Salon'}</div><div style={{fontSize:12,color:MUTED}}>{svc?.name||'Service'} · {reviewModal.booking_date}</div></div>
+              <div><div style={{fontSize:14,fontWeight:700}}>{br?.name||'Studio'}</div><div style={{fontSize:12,color:MUTED}}>{svc?.name||'Service'} · {reviewModal.booking_date}</div></div>
             </div>
             <div style={{marginBottom:16}}>
               <div style={{fontSize:13,fontWeight:600,color:DARK,marginBottom:10}}>How was your experience?</div>
@@ -1792,13 +1860,13 @@ export default function LuminBookClient() {
           const others=services.filter(s=>s.name.toLowerCase()===serviceCompare.name.toLowerCase()&&s.id!==serviceCompare.id);
           const allMatches=[serviceCompare,...others];
           return(<>
-            <div style={{fontSize:13,color:MUTED,marginBottom:14}}>{allMatches.length} salon{allMatches.length!==1?'s':''} offer{allMatches.length===1?'s':''} this service</div>
+            <div style={{fontSize:13,color:MUTED,marginBottom:14}}>{allMatches.length} studio{allMatches.length!==1?'s':''} offer{allMatches.length===1?'s':''} this service</div>
             <div style={{display:'grid',gap:10}}>
               {allMatches.map(s=>{const br=branches.find(b=>b.id===s.branch_id);const avg=branchAvgRating(s.branch_id);return(
                 <div key={s.id} style={{background:CARD,borderRadius:16,padding:14,border:`1px solid ${BORDER}`,display:'flex',gap:12,alignItems:'center'}}>
                   {s.images?.[0]?<img src={s.images[0]} alt="" style={{width:56,height:56,borderRadius:12,objectFit:'cover',flexShrink:0}}/>:<div style={{width:56,height:56,borderRadius:12,background:`linear-gradient(135deg,${ACCENT}30,${ROSE}30)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>✂</div>}
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:14,fontWeight:700}}>{br?.name||'Salon'}</div>
+                    <div style={{fontSize:14,fontWeight:700}}>{br?.name||'Studio'}</div>
                     <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:MUTED,marginTop:2}}>
                       <span style={{display:'flex',alignItems:'center',gap:2}}><Icon name="star" size={11} color={GOLD}/>{avg}</span>
                       <span>•</span>
@@ -1810,7 +1878,7 @@ export default function LuminBookClient() {
                 </div>
               )})}
             </div>
-            {allMatches.length===1&&<div style={{textAlign:'center',padding:'16px 0',color:MUTED,fontSize:13}}>Only one salon offers this service right now</div>}
+            {allMatches.length===1&&<div style={{textAlign:'center',padding:'16px 0',color:MUTED,fontSize:13}}>Only one studio offers this service right now</div>}
           </>);
         })()}
       </BottomSheet>
