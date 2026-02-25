@@ -343,7 +343,7 @@ function AuthScreen({onAuth}) {
     if(password.length<6)return setError('Password must be at least 6 characters.');
     if(phone&&!isValidZambianPhone(phone))return setError('Please enter a valid Zambian phone number (e.g. 0971234567) or leave it blank.');
     setSubmitting(true);setError('');
-    const{data,error:err}=await supabase.auth.signUp({email,password,options:{data:{name,phone}}});
+    const{data,error:err}=await supabase.auth.signUp({email,password,options:{data:{name,phone},emailRedirectTo:window.location.origin}});
     setSubmitting(false);
     if(err)return setError(friendlyError(err.message));
     if(data.user){
