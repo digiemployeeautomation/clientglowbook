@@ -1,8 +1,8 @@
 {
-  "name": "clientglowbook",
+  "name": "clientluminbook",
   "private": true,
   "version": "1.0.0",
-  "description": "GlowBook - Salon Booking Platform (Client App)",
+  "description": "LuminBook - Salon Booking Platform (Client App)",
   "type": "module",
   "scripts": {
     "dev": "vite",
