@@ -266,25 +266,7 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
           </div>
           <button onClick={onLogout} className="touch-target" style={{background:'none',border:'none',cursor:'pointer'}}><Icon name="logout" size={18} color={MUTED}/></button>
         </div>
-        <a
-          href="https://studio.luminbook.cc"
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            display:'flex',alignItems:'center',gap:8,marginTop:10,
-            padding:'9px 12px',borderRadius:10,
-            border:`1px solid ${BORDER}`,
-            background:'#faf7f5',
-            color:MUTED,fontSize:12,fontWeight:600,
-            textDecoration:'none',transition:'all .15s',
-          }}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor=ACCENT;e.currentTarget.style.color=ACCENT;}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor=BORDER;e.currentTarget.style.color=MUTED;}}
-        >
-          <LogoIcon size={18}/>
-          LuminBook Studio
-          <span style={{marginLeft:'auto',fontSize:11,opacity:.6}}>→</span>
-        </a>
+
       </div>
     </aside>
   );
@@ -347,11 +329,28 @@ function AppShell({page,setPage,children,client,unreadCount,onNotifClick,onLogou
     </header>
   );
 
+  const DesktopTopBar = () => (
+    <header style={{position:'fixed',top:0,left:SIDEBAR_W,right:0,zIndex:99,height:56,background:'rgba(250,247,245,.92)',backdropFilter:'blur(16px)',borderBottom:`1px solid ${BORDER}`,display:'flex',alignItems:'center',justifyContent:'flex-end',padding:'0 28px',gap:8}}>
+      <a
+        href="https://studio.luminbook.cc"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Open LuminBook Studio"
+        style={{display:'flex',alignItems:'center',gap:6,padding:'0 14px',height:36,borderRadius:10,border:`1.5px solid ${BORDER}`,background:CARD,color:DARK,fontSize:13,fontWeight:600,textDecoration:'none',whiteSpace:'nowrap',transition:'all .15s'}}
+        onMouseEnter={e=>{e.currentTarget.style.borderColor=ACCENT;e.currentTarget.style.color=ACCENT;}}
+        onMouseLeave={e=>{e.currentTarget.style.borderColor=BORDER;e.currentTarget.style.color=DARK;}}
+      >
+        <LogoIcon size={18}/>
+        LuminBook Studio
+      </a>
+    </header>
+  );
+
   const isDesktop = bp === 'desktop';
   return (
     <div style={{minHeight:'100vh',background:BG}}>
-      {isDesktop?<Sidebar/>:<><TopBar/><Drawer/></>}
-      <main style={{marginLeft:isDesktop?SIDEBAR_W:0,minHeight:isDesktop?'100vh':'auto'}}>{children}</main>
+      {isDesktop ? <><Sidebar/><DesktopTopBar/></> : <><TopBar/><Drawer/></>}
+      <main style={{marginLeft:isDesktop?SIDEBAR_W:0,paddingTop:isDesktop?56:0,minHeight:isDesktop?'100vh':'auto'}}>{children}</main>
     </div>
   );
 }
