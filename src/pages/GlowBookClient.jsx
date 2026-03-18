@@ -748,7 +748,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
                 <div style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <div style={{flex:1,minWidth:0,cursor:'pointer'}} onClick={()=>onServiceCompare(s)}>
                     <div style={{fontSize:15,fontWeight:600}}>{s.name}</div>
-                    <div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min • {fmtK(s.deposit_amount||branch?.default_deposit||100)} dep</div>
+                    <div style={{fontSize:12,color:MUTED,marginTop:2}}>{s.duration}{s.duration_max&&s.duration_max!==s.duration?`–${s.duration_max}`:''} min • {(s.deposit_amount != null ? fmtK(s.deposit_amount) : fmtK(branch?.default_deposit ?? 100))} dep</div>
                     {s.description&&<div style={{fontSize:12,color:MUTED,marginTop:4,lineHeight:1.4}}>{s.description.slice(0,80)}{s.description.length>80?'...':''}</div>}
                   </div>
                   <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
@@ -845,7 +845,8 @@ function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp
   if(!flow) return null;
   const update=data=>setBookingFlow(f=>({...f,...data}));
   const step=flow.step||0;
-  const deposit = parseFloat(flow.service?.deposit_amount) || parseFloat(flow.branch?.default_deposit) || 100;
+  // FIX: deposit_amount=0 means free — don't fall through to branch default
+  const deposit = flow.service?.deposit_amount != null ? parseFloat(flow.service.deposit_amount) : (parseFloat(flow.branch?.default_deposit) ?? 100);
   const pad=bp==='desktop'?'32px':'20px';
   const maxDays=flow.branch?.max_booking_days_ahead||30;
   const dates=[];for(let i=0;i<maxDays;i++){const d=new Date();d.setDate(d.getDate()+i);dates.push(d.toISOString().slice(0,10))}
@@ -1627,7 +1628,8 @@ export default function LuminBookClient() {
       }
     }
     const svc = flow.service;
-    const deposit = parseFloat(svc?.deposit_amount) || parseFloat(flow.branch?.default_deposit) || 100;
+    // FIX: deposit_amount=0 means free — don't fall through to branch default
+    const deposit = svc?.deposit_amount != null ? parseFloat(svc.deposit_amount) : (parseFloat(flow.branch?.default_deposit) ?? 100);
     const payerPhone = flow.payerPhone ?? client.phone ?? '';
     if(flow.staff?.id){
       const{data:ex}=await supabase.from('bookings').select('id').eq('staff_id',flow.staff.id).eq('booking_date',flow.date).eq('booking_time',flow.time).neq('status','cancelled').limit(1);
