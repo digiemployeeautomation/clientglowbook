@@ -43,6 +43,7 @@ const friendlyError = (msg) => {
   if (m.includes('rate limit') || m.includes('too many requests')) return 'Too many attempts. Please wait a moment and try again.';
   if (m.includes('network') || m.includes('fetch')) return 'Connection error. Check your internet and try again.';
   if (m.includes('timeout')) return 'Request timed out. Please try again.';
+  if (m.includes('invalid request param') || m.includes('invalid param')) return 'Something went wrong with the payment request. Please check your details and try again.';
   if (m.includes('duplicate') || m.includes('already exists') || m.includes('unique constraint')) return 'This record already exists.';
   if (m.includes('foreign key') || m.includes('violates')) return 'Couldn\'t save - a linked record is missing.';
   if (m.includes('database error') || m.includes('schema')) return 'Service temporarily unavailable. Please try again in a moment.';
@@ -1646,12 +1647,15 @@ export default function LuminBookClient() {
     }
     if (deposit > 0) {
       if (!payerPhone) { isProcessingPayment.current=false; showToastFn('Enter your mobile money number to pay', 'error'); return; }
-      const cleanPhone = payerPhone.replace(/[\s\-()]/g, '');
+      let cleanPhone = payerPhone.replace(/[\s\-()]/g, '');
       if (!/^(?:\+?260|0)[79]\d{8}$/.test(cleanPhone)) {
         isProcessingPayment.current=false;
         showToastFn('Please enter a valid Zambian phone number (e.g. 0971234567)', 'error');
         return;
       }
+      // Normalize to 260XXXXXXXXX format for payment API
+      if (cleanPhone.startsWith('+260')) cleanPhone = cleanPhone.slice(1);
+      else if (cleanPhone.startsWith('0')) cleanPhone = '260' + cleanPhone.slice(1);
       setPaymentState({ step: 'initiating', message: 'Initiating payment...' });
       paymentPollAbort.current = false;
       try {
@@ -1660,7 +1664,7 @@ export default function LuminBookClient() {
         const res = await fetch(SUPABASE_URL + '/functions/v1/process-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || ''), 'apikey': apiKey },
-          body: JSON.stringify({action:'initiate',branch_id:flow.branch.id,amount:deposit,payer_phone:cleanPhone,payment_type:'booking_deposit',booking_intent:{branch_id:flow.branch.id,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:parseFloat(svc.price)||0,client_notes:flow.clientNotes||null,recurring:flow.recurring||false,recurring_type:flow.recurringType||null,recurring_until:flow.recurringUntil||null}})
+          body: JSON.stringify({action:'initiate',branch_id:flow.branch.id,amount:Math.round(deposit),payer_phone:cleanPhone,payment_type:'booking_deposit',booking_intent:{branch_id:flow.branch.id,service_id:svc.id,staff_id:flow.staff?.id||null,booking_date:flow.date,booking_time:flow.time,duration:svc.duration_max||svc.duration||60,total_amount:Math.round(parseFloat(svc.price)||0),client_notes:flow.clientNotes||null,recurring:flow.recurring||false,recurring_type:flow.recurringType||null,recurring_until:flow.recurringUntil||null}})
         });
         const data = await res.json();
         if (data.error || !data.success) {
