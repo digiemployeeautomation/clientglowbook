@@ -812,7 +812,7 @@ function SalonPage({branch,services,reviews,staff,branchAvgRating,navigate,goBac
   );
 }
 
-function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment}) {
+function BookingFlow({flow,setBookingFlow,staff,services,createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment,isProcessingPayment}) {
   const [bookedSlots,setBookedSlots]=useState([]);
   const [blockedSlots,setBlockedSlots]=useState([]);
 
@@ -1811,7 +1811,7 @@ export default function LuminBookClient() {
     home: <HomePage {...{branches,services,reviews,staff,branchAvgRating,branchReviews,categories,selectedCategory,setSelectedCategory,searchQuery,setSearchQuery,navigate,favorites,toggleFav,reminders,getService,getBranch,bp,onServiceCompare,bookings}}/>,
     explore: <ExplorePage {...{branches,services,reviews,branchAvgRating,branchReviews,navigate,searchQuery,setSearchQuery,selectedCategory,setSelectedCategory,categories,favorites,toggleFav,bp,onServiceCompare}}/>,
     salon: <SalonPage {...{branch:selectedBranch,services:services.filter(s=>s.branch_id===selectedBranch?.id),reviews:branchReviews(selectedBranch?.id),staff:branchStaff(selectedBranch?.id),branchAvgRating,navigate,goBack,favorites,toggleFav,client,bp,allServices:services,allBranches:branches,onServiceCompare,onReview,clientBookings,reviewedIds}}/>,
-    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment}}/>,
+    booking: <BookingFlow {...{flow:{...bookingFlow,clientId:client?.id},setBookingFlow,staff:branchStaff(bookingFlow?.branch?.id),services:services.filter(s=>s.branch_id===bookingFlow?.branch?.id),createBooking,goBack,bp,client,paymentState,setPaymentState,cancelPayment,isProcessingPayment}}/>,
     bookings: <MyBookingsPage {...{upcoming:upcomingBookings,past:pastBookings,getService,getStaffMember,getBranch,cancelBooking,rescheduleBooking,navigate,bp,onReview,reviewedIds}}/>,
     profile: <ProfilePage {...{client,clientBookings,branches,favorites,getBranch,navigate,showToast:showToastFn,authUser,handleLogout,bp,onReview,reviewedIds,getService,refreshClient:fetchMyData}}/>,
   };
